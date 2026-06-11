@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "type": "group",
+      "ctime": 1781182772106,
+      "items": [],
+      "title": "Java"
+    },
+    {
+      "type": "group",
+      "ctime": 1781182777626,
+      "items": [],
+      "title": "中间件"
+    }
+  ]
+}
