@@ -8,5 +8,6 @@
   "monospaceFontFamily": "",
   "enabledCssSnippets": [
     "font"
-  ]
+  ],
+  "baseFontSize": 18
 }

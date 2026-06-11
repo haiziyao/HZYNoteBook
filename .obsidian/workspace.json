@@ -10,15 +10,17 @@
           {
             "id": "d3bf8c010d347719",
             "type": "leaf",
+            "pinned": true,
             "state": {
               "type": "markdown",
               "state": {
-                "file": "Daily/2026-06-11.md",
+                "file": "系统设计/gitbook_learn/系统设计gitbook简介.md",
                 "mode": "source",
                 "source": false
               },
+              "pinned": true,
               "icon": "lucide-file",
-              "title": "2026-06-11"
+              "title": "系统设计gitbook简介"
             }
           }
         ]
@@ -94,7 +96,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "Daily/2026-06-11.md",
+                "file": "系统设计/gitbook_learn/系统设计gitbook简介.md",
                 "collapseAll": true,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +106,7 @@
                 "unlinkedCollapsed": false
               },
               "icon": "links-coming-in",
-              "title": "2026-06-11 的反向链接列表"
+              "title": "系统设计gitbook简介 的反向链接列表"
             }
           },
           {
@@ -174,6 +176,18 @@
               "icon": "git-pull-request",
               "title": "Source Control"
             }
+          },
+          {
+            "id": "5e4660dd3f40b990",
+            "type": "leaf",
+            "state": {
+              "type": "file-properties",
+              "state": {
+                "file": "系统设计/gitbook_learn/系统设计gitbook简介.md"
+              },
+              "icon": "lucide-info",
+              "title": "系统设计gitbook简介的笔记属性"
+            }
           }
         ],
         "currentTab": 5
@@ -195,25 +209,44 @@
       "zk-prefixer:创建时间戳笔记": false,
       "markdown-importer:打开 Markdown 格式转换器": false,
       "obsidian-git:Open Git source control": false,
-      "templater-obsidian:Templater": false
+      "templater-obsidian:Templater": false,
+      "nutstore-sync:Start sync": false,
+      "nutstore-sync:Stop sync": false,
+      "nutstore-sync:Open chatbox": false
     }
   },
-  "active": "d3bf8c010d347719",
+  "active": "05e0208cccf9d66c",
   "lastOpenFiles": [
+    "系统设计/gitbook_learn/系统设计gitbook简介.md",
+    "系统设计/gitbook_learn/未命名.canvas",
     "🤖 AI 学习&实操/知识库Agent搭建指南.md",
-    "中间件",
-    "系统设计",
+    "系统设计/gitbook_learn",
+    "📅 日常工作/工作报告/周报/2025-09-21-Weekly1.md",
+    "💡 个人思考/2025-10-17-MemoryLove1.md",
+    "📅 日常工作/工作报告/周报/2025-10-05-Weekly3.md",
+    "💡 个人思考/2025-10-20-MemoryLove2.md",
+    "📅 日常工作/工作报告/周报/2025-12-07-Weekly4.md",
+    "📅 日常工作/工作报告/周报/2025-09-28-Weekly2.md",
+    "💼 工作专项/2025-12-20-ProjectDaily.md.tmp.17208.a84c156e5c30",
+    "📅 日常工作/工作报告/周报/2025-09-28-Weekly2.md.tmp.17208.42ecfb56f6b1",
+    "📅 日常工作/工作报告/周报/2025-12-07-Weekly4.md.tmp.17208.5e5e063be7ab",
+    "📅 日常工作/工作报告/周报/2025-10-05-Weekly3.md.tmp.17208.075de0fb3ce3",
+    "💼 工作专项/2025-12-20-ProjectDaily.md",
+    "📅 日常工作/工作报告/周报/2025-09-28-Weekly2.md.tmp.17208.4b3ad27097a6",
+    "📅 日常工作/工作报告/周报/2025-09-21-Weekly1.md.tmp.17208.b2d116eba4a4",
+    "📅 日常工作/工作报告/周报/2025-12-07-Weekly4.md.tmp.17208.918cf42c3f09",
+    "💼 工作专项/2025-12-20-ProjectDaily.md.tmp.17208.30c9893c0b5e",
+    "💡 个人思考/2025-10-20-MemoryLove2.md.tmp.17208.c76b70b99079",
+    "Z_TODO/2025-9-21-Weekly1.md",
+    "Z_TODO/2025-10-5-Weekly3.md",
+    "Z_TODO/2025-9-28-Weekly2.md",
+    "Z_TODO/2025-10-17-MemoryLove1.md",
+    "Z_TODO/2025-10-20-MemoryLove2.md",
+    "Z_TODO/2025-12-20-ProjectDaily.md",
+    "Z_TODO/2025-12-7-Weekly4.md",
+    "Daily/2026-06-11.md",
     "未命名 1.canvas",
     "未命名.canvas",
-    "📝 日常记录",
-    "🤖 AI 学习&实操",
-    "💡 个人思考",
-    "📚 专业领域",
-    "💼 工作专项",
-    "📅 日常工作/工作报告/月报",
-    "📅 日常工作/工作报告/周报",
-    "📅 日常工作/每日工作项",
-    "Daily/2026-06-11.md",
     "README.md",
     "2026-06-12.md",
     "2026-06-13.md",
@@ -221,7 +254,6 @@
     "未命名 2.md",
     "未命名 1.md",
     "202606112058.md",
-    "202606112059.md",
-    "欢迎.md"
+    "202606112059.md"
   ]
 }

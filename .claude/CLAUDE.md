@@ -28,7 +28,8 @@
 ---
 title: 笔记标题
 date: YYYY-MM-DD
-tags: [tag1, tag2]
+tags: [tag1, tag2] (tag只能有1或2个,只做精准分类,尽量保持同一文件夹有相同tag)
+description: (禁止描述中出现引号)
 source: (可选，URL 或来源描述)
 ---
 
