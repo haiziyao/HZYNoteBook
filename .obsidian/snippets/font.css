@@ -1,0 +1,5 @@
+body {
+  --font-interface: "Microsoft YaHei UI", "Segoe UI", sans-serif !important;
+  --font-text: "LXGW WenKai", "Microsoft YaHei", sans-serif !important;
+  --font-monospace: "Consolas", "Cascadia Code", monospace !important;
+}

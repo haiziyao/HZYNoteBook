@@ -4,5 +4,7 @@
   "blue-topaz-theme@@background-image-settings-switch": false,
   "blue-topaz-theme@@background-notebook-liked-switch": true,
   "blue-topaz-theme@@background-image-settings-command-palette-switch": false,
-  "blue-topaz-theme@@toggle-calendar-transparent": true
+  "blue-topaz-theme@@toggle-calendar-transparent": true,
+  "Blue-Topaz-Codebox-Highlight@@code-theme-selection": "code-theme-material-palenight",
+  "blue-topaz-theme@@toggle-bg-panel-page": false
 }

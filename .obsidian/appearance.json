@@ -1,5 +1,12 @@
 {
   "accentColor": "#5cf582",
   "cssTheme": "Blue Topaz",
-  "theme": "obsidian"
+  "theme": "obsidian",
+  "interfaceFontFamily": "",
+  "textFontFamily": "",
+  "baseFontSizeAction": true,
+  "monospaceFontFamily": "",
+  "enabledCssSnippets": [
+    "font"
+  ]
 }
