@@ -1,5 +1,42 @@
+/* ===== 1. 优先加载 CDN 版 LXGW WenKai ===== */
+@import url("https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.min.css");
+
+/* ===== 2. 本地兜底字体：需要用户系统已安装 LXGW WenKai ===== */
+@font-face {
+  font-family: "LXGW WenKai Local";
+  src: local("LXGW WenKai"),
+       local("LXGW WenKai Regular"),
+       local("LXGW WenKai Screen");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ===== 3. Obsidian 字体变量 ===== */
 body {
+  --font-text: "LXGW WenKai", "LXGW WenKai Local", "Microsoft YaHei", sans-serif !important;
   --font-interface: "Microsoft YaHei UI", "Segoe UI", sans-serif !important;
-  --font-text: "LXGW WenKai", "Microsoft YaHei", sans-serif !important;
   --font-monospace: "Consolas", "Cascadia Code", monospace !important;
+}
+
+/* ===== 4. 编辑模式正文 ===== */
+.markdown-source-view .cm-content,
+.markdown-source-view .cm-line,
+.markdown-source-view .cm-line * {
+  font-family: "LXGW WenKai", "LXGW WenKai Local", "Microsoft YaHei", sans-serif !important;
+}
+
+/* ===== 5. 阅读模式正文 ===== */
+.markdown-preview-view,
+.markdown-preview-view * {
+  font-family: "LXGW WenKai", "LXGW WenKai Local", "Microsoft YaHei", sans-serif !important;
+}
+
+/* ===== 6. 代码块保持等宽字体 ===== */
+code,
+pre,
+.cm-inline-code,
+.HyperMD-codeblock,
+.HyperMD-codeblock * {
+  font-family: "Consolas", "Cascadia Code", monospace !important;
 }

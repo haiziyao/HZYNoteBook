@@ -25,13 +25,14 @@
             "id": "7bf9fd047ab78d70",
             "type": "leaf",
             "state": {
-              "type": "bases",
+              "type": "markdown",
               "state": {
-                "file": "未命名.base",
-                "viewName": "表格"
+                "file": "2026-06-11.md",
+                "mode": "source",
+                "source": false
               },
-              "icon": "lucide-table",
-              "title": "未命名"
+              "icon": "lucide-file",
+              "title": "2026-06-11"
             }
           }
         ],
@@ -212,10 +213,15 @@
       "templater-obsidian:Templater": false
     }
   },
-  "active": "7bf9fd047ab78d70",
+  "active": "c1370973bc2c0031",
   "lastOpenFiles": [
-    "README.md",
+    "未命名.canvas",
+    "2026-06-11.md",
     "未命名.base",
+    "2026-06-12.md",
+    "2026-06-13.md",
+    "TimeStap",
+    "README.md",
     "未命名.md",
     "未命名 2.md",
     "未命名 1.md",
@@ -227,12 +233,9 @@
     "Java/JUC/P",
     "Java/JUC",
     "Daily",
-    "Java",
     "202606112058.md",
     "202606112059.md",
-    "2026-06-11.md",
     "Daily/2026-06-11.md",
-    "欢迎.md",
-    "未命名.canvas"
+    "欢迎.md"
   ]
 }
