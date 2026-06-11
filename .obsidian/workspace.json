@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "🤖 AI 学习&实操/知识库Agent搭建指南.md",
+                "file": "Daily/2026-06-11.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "知识库Agent搭建指南"
+              "title": "2026-06-11"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "🤖 AI 学习&实操/知识库Agent搭建指南.md",
+                "file": "Daily/2026-06-11.md",
                 "collapseAll": true,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": false
               },
               "icon": "links-coming-in",
-              "title": "知识库Agent搭建指南 的反向链接列表"
+              "title": "2026-06-11 的反向链接列表"
             }
           },
           {
@@ -198,10 +198,12 @@
       "templater-obsidian:Templater": false
     }
   },
-  "active": "05e0208cccf9d66c",
+  "active": "d3bf8c010d347719",
   "lastOpenFiles": [
-    "未命名 1.canvas",
     "🤖 AI 学习&实操/知识库Agent搭建指南.md",
+    "中间件",
+    "系统设计",
+    "未命名 1.canvas",
     "未命名.canvas",
     "📝 日常记录",
     "🤖 AI 学习&实操",
@@ -211,8 +213,6 @@
     "📅 日常工作/工作报告/月报",
     "📅 日常工作/工作报告/周报",
     "📅 日常工作/每日工作项",
-    "📅 日常工作/近期规划",
-    "📅 日常工作/工作报告",
     "Daily/2026-06-11.md",
     "README.md",
     "2026-06-12.md",
