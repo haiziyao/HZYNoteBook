@@ -1,7 +1,8 @@
 ---
 title: 开发记录日记--01
 date: 2025-12-20
-tags: [Development-Diary, XJTUTools, Spring-Boot, JS逆向]
+tags:
+  - Development-Diary
 description: 一个不懂js逆向犬，吠
 ---
 

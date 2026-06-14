@@ -1,0 +1,21 @@
+{
+	"nodes":[
+		{"id":"7bb208039953b275","type":"text","text":"Object: 把目标描述清楚\n","x":20,"y":-210,"width":250,"height":60,"color":"5"},
+		{"id":"608705b59c4a7015","type":"text","text":"Context: 给AI补上背景信息,消除歧义\n","x":20,"y":-320,"width":250,"height":60,"color":"5"},
+		{"id":"22c1f538eef8ab9f","type":"text","text":"Style: 指定人物风格,文体风格","x":20,"y":-80,"width":250,"height":60,"color":"5"},
+		{"id":"69b40283ce593e96","type":"text","text":"Tone: 语气","x":20,"y":40,"width":250,"height":60,"color":"5"},
+		{"id":"dc39b4465116e3e2","type":"text","text":"Audience: 受众","x":20,"y":160,"width":250,"height":60,"color":"5"},
+		{"id":"97a546732f2b59c7","type":"text","text":"Response: 控制输出的结构","x":20,"y":280,"width":250,"height":60,"color":"5"},
+		{"id":"c488c1dee43a025b","type":"text","text":"CO-STAR框架","x":-340,"y":-20,"width":250,"height":60,"color":"1"},
+		{"id":"66b3943689cca80e","type":"file","file":"Architecture/老齐AI架构/实践/CO-STAT实践.md","x":-490,"y":100,"width":400,"height":400,"color":"6"}
+	],
+	"edges":[
+		{"id":"5c41e4e2bd35a963","fromNode":"c488c1dee43a025b","fromSide":"right","toNode":"608705b59c4a7015","toSide":"left"},
+		{"id":"9cd94a85f1b60785","fromNode":"c488c1dee43a025b","fromSide":"right","toNode":"7bb208039953b275","toSide":"left"},
+		{"id":"f55a61e6495d5e12","fromNode":"c488c1dee43a025b","fromSide":"right","toNode":"22c1f538eef8ab9f","toSide":"left"},
+		{"id":"a6617d816a943d1c","fromNode":"c488c1dee43a025b","fromSide":"right","toNode":"69b40283ce593e96","toSide":"left"},
+		{"id":"4ded04777623db1e","fromNode":"c488c1dee43a025b","fromSide":"right","toNode":"dc39b4465116e3e2","toSide":"left"},
+		{"id":"c10ec158286ddc64","fromNode":"c488c1dee43a025b","fromSide":"right","toNode":"97a546732f2b59c7","toSide":"left"},
+		{"id":"2b7d5dd99959791b","fromNode":"c488c1dee43a025b","fromSide":"bottom","toNode":"66b3943689cca80e","toSide":"top"}
+	]
+}

@@ -1,7 +1,8 @@
 ---
 title: Silent Love
 date: 2025-10-20
-tags: [Memory, 回忆, 诗, 青春, 暗恋]
+tags:
+  - Memory
 description: Unspoken Love
 ---
 

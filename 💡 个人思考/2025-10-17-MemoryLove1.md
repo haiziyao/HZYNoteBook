@@ -1,7 +1,8 @@
 ---
 title: My memories
 date: 2025-10-17
-tags: [Memory, 回忆, 高中, 青春, 成长]
+tags:
+  - Memory
 ---
 
 **"我并没有刻意去记住你，只是你真实地活在我的记忆里。"**
