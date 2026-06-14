@@ -873,3 +873,10 @@ disable-model-invocation: true
 - CLAUDE.md 如果已存在，将新内容合并到已有内容中，不要覆盖用户已有的配置
 - Skills 文件夹如果已有同名 skill，先向用户确认是否覆盖
 - 搭建过程中每完成一个步骤，向用户简要汇报进度
+
+---
+
+## 相关笔记
+
+- [[Loop Engineering]] — Agent 循环工程方法论，知识库 Agent 的底层设计理念
+- [[Prompt Experience]] — Agent prompt 与插图风格模板

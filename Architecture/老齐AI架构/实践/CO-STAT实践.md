@@ -24,3 +24,12 @@
 不设限制,但需要用md处理好标题,加粗,笔记引用.
 ```
 
+---
+
+## 相关笔记
+
+- [[2025-10-17-MemoryLove1]] — 本 prompt 的素材来源：高中回忆录
+- [[2025-10-20-MemoryLove2]] — 本 prompt 的素材来源：暗恋与诗歌
+- [[Loop Engineering]] — Agent 循环工程方法论，CO-STAT 的上层设计范式
+- [[Prompt Experience]] — 更多 prompt 模板与插图风格参考
+
