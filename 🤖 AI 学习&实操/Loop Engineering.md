@@ -1,8 +1,8 @@
 ---
 tags:
   - agent
+color: cyan
 ---
-
 ### 什么是Loop Engineering
 
 从过去来,早期 Prompt Engineering,强调的是角色,定义操作,我们需要精确的提示词进行指导.

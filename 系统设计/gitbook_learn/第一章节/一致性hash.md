@@ -2,8 +2,8 @@
 tags:
   - 系统设计
 description: 一致性hash
+color: cyan
 ---
-
 什么是一致性hash算法,为什么需要一致性hash算法?
 
 #### 引入

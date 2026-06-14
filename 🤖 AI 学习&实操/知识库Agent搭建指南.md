@@ -1,3 +1,8 @@
+---
+tags:
+  - agent
+color: cyan
+---
 # 知识库 Agent 搭建指南 — 给 AI 的操作手册
 
 ## 概述
@@ -8,7 +13,6 @@
 
 **前置条件**：用户已安装 Obsidian，已创建 Vault，已安装 Claudian 社区插件。
 
----
 
 ## Claudian 插件安装说明
 

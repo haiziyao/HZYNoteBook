@@ -4,8 +4,8 @@ date: 2025-10-20
 tags:
   - Memory
 description: Unspoken Love
+color: pink
 ---
-
 **"不能再过靠近。"**
 
 > 人总是习惯于去回忆某些事情，在记忆的边边角角寻求，挣扎。

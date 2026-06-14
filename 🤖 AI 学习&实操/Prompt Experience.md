@@ -5,8 +5,8 @@ tags:
   - agent
   - prompt
 description: AI prompt and illustration style templates for article enhancement
+color: cyan
 ---
-
 #### Agent 前沿技术
 
 ``` md
