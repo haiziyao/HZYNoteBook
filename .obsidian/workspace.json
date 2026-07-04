@@ -4,37 +4,27 @@
     "type": "split",
     "children": [
       {
-        "id": "371d82167dc99650",
+        "id": "da3b409a433b183c",
         "type": "tabs",
         "children": [
           {
-            "id": "d3bf8c010d347719",
+            "id": "31a8965daf65d693",
             "type": "leaf",
-            "pinned": true,
             "state": {
-              "type": "markdown",
+              "type": "canvas",
               "state": {
-                "file": "系统设计/gitbook_learn/系统设计gitbook简介.md",
-                "mode": "source",
-                "source": false
+                "file": "未命名.canvas",
+                "viewState": {
+                  "x": 0,
+                  "y": 0,
+                  "zoom": 0
+                }
               },
-              "pinned": true,
-              "icon": "lucide-file",
-              "title": "系统设计gitbook简介"
-            }
-          },
-          {
-            "id": "1cf85aff548e29f4",
-            "type": "leaf",
-            "state": {
-              "type": "graph",
-              "state": {},
-              "icon": "lucide-git-fork",
-              "title": "关系图谱"
+              "icon": "lucide-layout-dashboard",
+              "title": "未命名"
             }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "vertical"
@@ -102,39 +92,6 @@
         "type": "tabs",
         "children": [
           {
-            "id": "83ff2788e0146c3e",
-            "type": "leaf",
-            "state": {
-              "type": "backlink",
-              "state": {
-                "file": "系统设计/gitbook_learn/第一章节/一致性hash.md",
-                "collapseAll": true,
-                "extraContext": false,
-                "sortOrder": "alphabetical",
-                "showSearch": true,
-                "searchQuery": "",
-                "backlinkCollapsed": false,
-                "unlinkedCollapsed": false
-              },
-              "icon": "links-coming-in",
-              "title": "一致性hash 的反向链接列表"
-            }
-          },
-          {
-            "id": "cc0712f789b8e311",
-            "type": "leaf",
-            "state": {
-              "type": "outgoing-link",
-              "state": {
-                "file": "系统设计/gitbook_learn/第一章节/一致性hash.md",
-                "linksCollapsed": false,
-                "unlinkedCollapsed": false
-              },
-              "icon": "links-going-out",
-              "title": "一致性hash 的出链列表"
-            }
-          },
-          {
             "id": "850a7a0bcb8342f0",
             "type": "leaf",
             "state": {
@@ -169,23 +126,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "知识库Agent搭建指南.md",
+                "file": "CS/算子开发/算子开发认证(入门级).md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "知识库Agent搭建指南 的大纲"
-            }
-          },
-          {
-            "id": "05e0208cccf9d66c",
-            "type": "leaf",
-            "state": {
-              "type": "git-view",
-              "state": {},
-              "icon": "git-pull-request",
-              "title": "Source Control"
+              "title": "算子开发认证(入门级) 的大纲"
             }
           },
           {
@@ -194,18 +141,61 @@
             "state": {
               "type": "file-properties",
               "state": {
-                "file": "💡 个人思考/2025-10-17-MemoryLove1.md"
+                "file": "未命名.canvas"
               },
               "icon": "lucide-info",
-              "title": "2025-10-17-MemoryLove1的笔记属性"
+              "title": "未命名的笔记属性"
+            }
+          },
+          {
+            "id": "5eff03e71f507ea1",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "CS/算子开发/算子开发认证(入门级).md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "算子开发认证(入门级) 的反向链接列表"
+            }
+          },
+          {
+            "id": "28fa2d82c875e75a",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "CS/算子开发/算子开发认证(入门级).md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "算子开发认证(入门级) 的出链列表"
+            }
+          },
+          {
+            "id": "21d550a9ea4cfddd",
+            "type": "leaf",
+            "state": {
+              "type": "git-view",
+              "state": {},
+              "icon": "git-pull-request",
+              "title": "Source Control"
             }
           }
         ],
-        "currentTab": 5
+        "currentTab": 6
       }
     ],
     "direction": "horizontal",
-    "width": 388.5
+    "width": 418.5
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -226,48 +216,57 @@
       "nutstore-sync:Open chatbox": false
     }
   },
-  "active": "1cf85aff548e29f4",
+  "active": "21d550a9ea4cfddd",
   "lastOpenFiles": [
-    "系统设计/gitbook_learn/未命名.canvas",
-    "Daily/2026-06-11.md",
-    "🤖 AI 学习&实操/Prompt Experience.md",
-    "🤖 AI 学习&实操/知识库Agent搭建指南.md",
-    "Architecture/老齐AI架构/Memory工程.canvas",
+    "未命名.base",
+    "未命名.canvas",
+    "CS/数据库系统/DB实验.md.tmp.42592.9bbb044496eb",
+    "Attachment/DB实验/Pasted image 20260630143659.png",
+    "Attachment/DB实验/Pasted image 20260630143644.png",
+    "Attachment/DB实验/Pasted image 20260630143309.png",
+    "Attachment/DB实验/Pasted image 20260630142745.png",
+    "Attachment/DB实验/Pasted image 20260630140407.png",
+    "Attachment/DB实验/Pasted image 20260630140142.png",
+    "Attachment/DB实验/Pasted image 20260630135454.png",
+    "Attachment/DB实验/Pasted image 20260630132232.png",
+    "Attachment/DB实验/Pasted image 20260630132205.png",
+    "Attachment/DB实验/Pasted image 20260630131551.png",
+    "Attachment/DB实验",
+    "未命名.md",
+    "Leetcode/Mysql/Mysql 基础 50 题.md",
     "系统设计/gitbook_learn/系统设计gitbook简介.md",
-    "📅 日常工作/工作报告/周报/2025-09-21-Weekly1.md",
-    "📅 日常工作/工作报告/周报/2025-09-28-Weekly2.md.tmp.16816.574f95ac5877",
-    "📝 日常记录/2025-12-20-ProjectDaily.md.tmp.16816.d3086321bb72",
-    "💡 个人思考/2025-10-20-MemoryLove2.md.tmp.16816.b2f720b82f4f",
-    "💡 个人思考/2025-10-17-MemoryLove1.md.tmp.16816.5ef62e2a712f",
-    "🤖 AI 学习&实操/Loop Engineering.md.tmp.16816.786611fb2dbc",
-    "🤖 AI 学习&实操/Prompt Experience.md.tmp.16816.d72305fdd0e5",
-    "系统设计/gitbook_learn/第一章节/一致性hash.md.tmp.16816.3658818d7291",
-    "🤖 AI 学习&实操/知识库Agent搭建指南.md.tmp.16816.0b38825b9aae",
-    "Architecture/老齐AI架构/实践/CO-STAT实践.md.tmp.16816.545ef576ded2",
-    "DirtyWork/马原/资料收集.md.tmp.16816.bb46539d272e",
-    "🤖 AI 学习&实操/Loop Engineering.md",
-    "Architecture/老齐AI架构/实践/CO-STAT实践.md",
-    "ChatGPT Image 2026年6月12日 10_38_26.png.md",
+    "📚 专业领域/政治/习概/知识点.md.tmp.42592.816233e2137d",
+    "CS/数据库系统/DB实验.md.tmp.42592.c009b95f46d8",
+    "CS/数据库系统/DB学习感受.md.tmp.42592.22ac2b799545",
+    "系统设计/gitbook_learn/未命名.canvas",
     "系统设计/gitbook_learn/第一章节/一致性hash.md",
     "系统设计/gitbook_learn/第一章节/限流算法.md",
-    "💡 个人思考/2025-10-17-MemoryLove1.md",
-    "📝 日常记录/2025-12-20-ProjectDaily.md",
-    "📅 日常工作/工作报告/周报/2025-09-28-Weekly2.md",
-    "💡 个人思考/2025-10-20-MemoryLove2.md",
-    "📅 日常工作/工作报告/周报/2025-10-05-Weekly3.md",
-    "📅 日常工作/工作报告/周报/2025-12-07-Weekly4.md",
+    "CS/操作系统/S081/导学.md",
+    "CS/数据库系统/DB复习.md",
+    "💡 个人思考/我,HZY,不喜欢现在的一切,不喜欢自己.md.tmp.42592.b1e9a21b9119",
+    "💡 个人思考/From RuboVision.md.tmp.42592.f5943ed16fc5",
+    "📚 专业领域/政治/马原/资料收集.md",
+    "CS/数据库系统",
+    "Leetcode/Mysql",
+    "Daily/2026-06-11.md",
+    "CS/数据库系统/DB学习感受.md",
+    "📚 专业领域/政治/习概/知识点.md",
+    "📚 专业领域/政治/马原/马原速通--鉴证之路的启蒙课.md",
+    "🤖 AI 学习&实操/Prompt Experience.md",
+    "🤖 AI 学习&实操/Loop Engineering.md",
+    "🤖 AI 学习&实操/知识库Agent搭建指南.md",
+    "README.md",
+    "CS/数据库系统/DB实验.md",
+    "DB实验.md",
+    "💡 个人思考/我,HZY,不喜欢现在的一切,不喜欢自己.md",
+    "CS/算子开发/Prompt.md",
+    "CS/算子开发/算子开发认证(入门级).md",
+    "💡 个人思考/From RuboVision.md",
+    "📚 专业领域/算子开发/算子开发认证(入门级).md",
+    "📚 专业领域/算子开发/Prompt.md",
+    "📚 专业领域/操作系统/S081/导学.md",
+    "Architecture/老齐AI架构/Memory工程.canvas",
     "Architecture/老齐AI架构/Prompt工程.canvas",
-    "DirtyWork/马原/资料收集.md",
-    "ChatGPT Image 2026年6月12日 10_38_26.png",
-    "Z_TODO/2025-9-21-Weekly1.md",
-    "Z_TODO/2025-10-5-Weekly3.md",
-    "Z_TODO/2025-9-28-Weekly2.md",
-    "Z_TODO/2025-10-17-MemoryLove1.md",
-    "Z_TODO/2025-10-20-MemoryLove2.md",
-    "Z_TODO/2025-12-20-ProjectDaily.md",
-    "Z_TODO/2025-12-7-Weekly4.md",
-    "未命名 1.canvas",
-    "未命名.canvas",
-    "README.md"
+    "未命名 1.canvas"
   ]
 }
