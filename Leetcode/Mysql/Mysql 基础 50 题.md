@@ -1,4 +1,3 @@
-
 ---
 title: Mysql 基础 50 题
 date: 2026-06-22
@@ -6,7 +5,6 @@ tags: [数据库, SQL]
 description: LeetCode SQL 50 题练习笔记
 color: cyan
 ---
-
 #### [1581 进店却未交易的顾客](https://leetcode.cn/problems/customer-who-visited-but-did-not-make-any-transactions?envType=study-plan-v2&envId=sql-free-50)
 
 分析一下,这道题主要来借机会讲一下各种方法优缺点.
@@ -115,7 +113,7 @@ group by s.machine_id
 
 
 
-### Join 的 on 和 using
+#### Join 的 on 和 using
 
 [一道连接题](https://leetcode.cn/problems/confirmation-rate?envType=study-plan-v2&envId=sql-free-50)
 
@@ -140,3 +138,45 @@ group by s.user_id
 
 
 > 可以打开上面那个链接,去动手试试 把 s.user_id 改为 c.user_id 或者 user_id 看看结果
+
+
+#### 关于查询优化的一些示例
+
+[一道例题](https://leetcode.cn/problems/immediate-food-delivery-ii?envType=study-plan-v2&envId=sql-free-50)
+[另一道例题](https://leetcode.cn/problems/game-play-analysis-iv)
+从这一道例题,其实对于一些场景,我们很难去套用我们学到的理论
+```
+选择下推
+投影下推
+先过滤后连接
+减少中间结果
+```
+
+
+
+#### 关于规避NOT IN的风险
+使用having来代替 not in 
+
+[例题](https://leetcode.cn/problems/sales-analysis-iii?envType=study-plan-v2&envId=sql-free-50)
+
+``` sql
+# 存在严重错误
+SELECT product_id, product_name 
+FROM Product 
+WHERE product_id NOT IN (
+    SELECT product_id FROM Sales 
+    WHERE sale_date < '2019-01-01' OR sale_date > '2019-03-31'
+);
+
+
+# 使用having
+SELECT product_id, product_name 
+FROM Product 
+WHERE product_id NOT IN (
+    SELECT product_id FROM Sales 
+    WHERE (sale_date < '2019-01-01' OR sale_date > '2019-03-31')
+      AND product_id IS NOT NULL
+)
+AND product_id IN (SELECT DISTINCT product_id FROM Sales);
+
+```

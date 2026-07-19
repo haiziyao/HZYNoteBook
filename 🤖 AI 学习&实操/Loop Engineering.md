@@ -1,6 +1,9 @@
 ---
+title: Loop Engineering
+date: 2026-07-04
 tags:
   - agent
+description: 围绕心跳 worktree skill connector subAgent 和 Memory 的 Agent 循环工程方法论
 color: cyan
 ---
 ### 什么是Loop Engineering
@@ -55,7 +58,6 @@ Loop Engineering带来的绝对不是一场解放运动 ! ! !
 而不是一个 "灾难的启动者" ! ! !
 
 ---
-
 ## 相关笔记
 
 - [[Prompt Experience]] — Agent 前沿技术与插图 prompt 模板

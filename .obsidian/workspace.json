@@ -4,24 +4,21 @@
     "type": "split",
     "children": [
       {
-        "id": "da3b409a433b183c",
+        "id": "9a7ddde46dec848b",
         "type": "tabs",
         "children": [
           {
-            "id": "31a8965daf65d693",
+            "id": "46780647b552d6f0",
             "type": "leaf",
             "state": {
-              "type": "canvas",
+              "type": "markdown",
               "state": {
-                "file": "未命名.canvas",
-                "viewState": {
-                  "x": 0,
-                  "y": 0,
-                  "zoom": 0
-                }
+                "file": "Java/JVM/JVM-实战篇.md",
+                "mode": "source",
+                "source": false
               },
-              "icon": "lucide-layout-dashboard",
-              "title": "未命名"
+              "icon": "lucide-file",
+              "title": "JVM-实战篇"
             }
           }
         ]
@@ -81,7 +78,8 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300
+    "width": 300,
+    "collapsed": true
   },
   "right": {
     "id": "b2f9f69629c710b0",
@@ -126,13 +124,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "CS/算子开发/算子开发认证(入门级).md",
+                "file": "Java/JVM/JVM-基础篇.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "算子开发认证(入门级) 的大纲"
+              "title": "JVM-基础篇 的大纲"
             }
           },
           {
@@ -141,10 +139,10 @@
             "state": {
               "type": "file-properties",
               "state": {
-                "file": "未命名.canvas"
+                "file": "JVM-基础篇.md"
               },
               "icon": "lucide-info",
-              "title": "未命名的笔记属性"
+              "title": "JVM-基础篇的笔记属性"
             }
           },
           {
@@ -191,11 +189,12 @@
             }
           }
         ],
-        "currentTab": 6
+        "currentTab": 2
       }
     ],
     "direction": "horizontal",
-    "width": 418.5
+    "width": 418.5,
+    "collapsed": true
   },
   "left-ribbon": {
     "hiddenItems": {
@@ -216,11 +215,33 @@
       "nutstore-sync:Open chatbox": false
     }
   },
-  "active": "21d550a9ea4cfddd",
+  "active": "46780647b552d6f0",
   "lastOpenFiles": [
-    "未命名.base",
+    "Attachment/Pasted image 20260719155827.png",
+    "Java/JVM/JVM-基础篇.md",
+    "Java/JVM/JVM-实战篇.md",
+    "🤖 AI 学习&实操/知识库Agent搭建指南.md.tmp.8840.3e7e74de6d29",
+    "🤖 AI 学习&实操/Loop Engineering.md.tmp.8840.4aae4c5ec916",
+    "💡 个人思考/2025-10-17-MemoryLove1.md.tmp.8840.96e229d872d5",
+    "系统设计/gitbook_learn/第一章节/限流算法.md.tmp.8840.f28bcad0377d",
+    "系统设计/gitbook_learn/第一章节/一致性hash.md.tmp.8840.13489a2fd370",
+    "Architecture/老齐AI架构/实践/CO-STAT实践.md.tmp.8840.f41a4e3965e4",
+    "JVM-基础篇.md.tmp.8840.b5a52698f23f",
+    "📚 专业领域/政治/马原/马原速通--鉴证之路的启蒙课.md",
+    "📚 专业领域/政治/马原/资料收集.md",
+    "💡 个人思考/From RuboVision.md",
+    "💡 个人思考/我,HZY,不喜欢现在的一切,不喜欢自己.md",
+    "💡 个人思考/2025-12-20-ProjectDaily.md",
+    "💡 个人思考/2025-10-20-MemoryLove2.md",
+    "💡 个人思考/2025-10-17-MemoryLove1.md",
+    "🤖 AI 学习&实操/知识库Agent搭建指南.md",
+    "🤖 AI 学习&实操/Loop Engineering.md",
+    "Java/JVM",
+    "Leetcode/Mysql/Mysql 基础 50 题.md",
+    "CS/算子开发/算子开发认证(入门级).md",
+    "💡 个人思考/我,HZY,不喜欢现在的一切,不喜欢自己.md.tmp.42592.4e82df081eb1",
+    "CS/数据库系统/DB复习.md.tmp.42592.d2caa67b89be",
     "未命名.canvas",
-    "CS/数据库系统/DB实验.md.tmp.42592.9bbb044496eb",
     "Attachment/DB实验/Pasted image 20260630143659.png",
     "Attachment/DB实验/Pasted image 20260630143644.png",
     "Attachment/DB实验/Pasted image 20260630143309.png",
@@ -231,40 +252,19 @@
     "Attachment/DB实验/Pasted image 20260630132232.png",
     "Attachment/DB实验/Pasted image 20260630132205.png",
     "Attachment/DB实验/Pasted image 20260630131551.png",
-    "Attachment/DB实验",
-    "未命名.md",
-    "Leetcode/Mysql/Mysql 基础 50 题.md",
     "系统设计/gitbook_learn/系统设计gitbook简介.md",
-    "📚 专业领域/政治/习概/知识点.md.tmp.42592.816233e2137d",
-    "CS/数据库系统/DB实验.md.tmp.42592.c009b95f46d8",
-    "CS/数据库系统/DB学习感受.md.tmp.42592.22ac2b799545",
     "系统设计/gitbook_learn/未命名.canvas",
     "系统设计/gitbook_learn/第一章节/一致性hash.md",
     "系统设计/gitbook_learn/第一章节/限流算法.md",
     "CS/操作系统/S081/导学.md",
     "CS/数据库系统/DB复习.md",
-    "💡 个人思考/我,HZY,不喜欢现在的一切,不喜欢自己.md.tmp.42592.b1e9a21b9119",
-    "💡 个人思考/From RuboVision.md.tmp.42592.f5943ed16fc5",
-    "📚 专业领域/政治/马原/资料收集.md",
-    "CS/数据库系统",
-    "Leetcode/Mysql",
     "Daily/2026-06-11.md",
     "CS/数据库系统/DB学习感受.md",
     "📚 专业领域/政治/习概/知识点.md",
-    "📚 专业领域/政治/马原/马原速通--鉴证之路的启蒙课.md",
     "🤖 AI 学习&实操/Prompt Experience.md",
-    "🤖 AI 学习&实操/Loop Engineering.md",
-    "🤖 AI 学习&实操/知识库Agent搭建指南.md",
     "README.md",
     "CS/数据库系统/DB实验.md",
     "DB实验.md",
-    "💡 个人思考/我,HZY,不喜欢现在的一切,不喜欢自己.md",
-    "CS/算子开发/Prompt.md",
-    "CS/算子开发/算子开发认证(入门级).md",
-    "💡 个人思考/From RuboVision.md",
-    "📚 专业领域/算子开发/算子开发认证(入门级).md",
-    "📚 专业领域/算子开发/Prompt.md",
-    "📚 专业领域/操作系统/S081/导学.md",
     "Architecture/老齐AI架构/Memory工程.canvas",
     "Architecture/老齐AI架构/Prompt工程.canvas",
     "未命名 1.canvas"

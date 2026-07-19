@@ -1,7 +1,10 @@
 ---
+title: CO-STAT实践
+date: 2026-07-04
 tags:
   - agent
   - prompt
+description: CO-STAT 架构下的 Agent Prompt 实践与记忆驱动写作方法
 color: cyan
 ---
 #### MemoryLove
@@ -29,7 +32,6 @@ color: cyan
 ```
 
 ---
-
 ## 相关笔记
 
 - [[2025-10-17-MemoryLove1]] — 本 prompt 的素材来源：高中回忆录

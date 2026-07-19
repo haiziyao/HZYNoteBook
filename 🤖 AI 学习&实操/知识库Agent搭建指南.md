@@ -1,6 +1,9 @@
 ---
+title: 知识库 Agent 搭建指南
+date: 2026-07-04
 tags:
   - agent
+description: 使用 Claudian 与 Markdown Skills 搭建知识库 Agent 的操作手册
 color: cyan
 ---
 # 知识库 Agent 搭建指南 — 给 AI 的操作手册
@@ -879,7 +882,6 @@ disable-model-invocation: true
 - 搭建过程中每完成一个步骤，向用户简要汇报进度
 
 ---
-
 ## 相关笔记
 
 - [[Loop Engineering]] — Agent 循环工程方法论，知识库 Agent 的底层设计理念

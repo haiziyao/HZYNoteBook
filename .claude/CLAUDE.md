@@ -19,6 +19,7 @@
 2. **尊重已有 frontmatter**：修改笔记时保留用户已有的 frontmatter 字段，只添加缺失的字段。
 3. **使用 wikilink**：所有内部链接使用 `[[笔记名]]` 格式的 wikilink。
 4. **优先搜索 vault**：回答用户问题时，先搜索 vault 中的笔记内容。vault 中有的信息优先引用，不要用通用知识替代用户自己积累的内容。
+5. **frontmatter 紧贴标题**：frontmatter 结束的 `---` 与笔记标题/正文之间**禁止有空行**，否则 Obsidian 无法渲染笔记属性。frontmatter 必须从文件第 1 行开始，前面不能有空行。
 
 ## 标准 frontmatter 格式
 
@@ -32,7 +33,6 @@ tags: [tag1, tag2] (tag只能有1或2个,只做精准分类,尽量保持同一�
 description: (禁止描述中出现引号)
 source: (可选，URL 或来源描述)
 ---
-
 ## 笔记颜色约定
 
 在 Obsidian graph view 中按笔记类型使用固定颜色：
