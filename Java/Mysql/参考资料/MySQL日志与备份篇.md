@@ -1,5 +1,5 @@
 ---
-title: MySQL 日志与备份篇（参考）
+title: 第17章_其他数据库日志
 date: 2026-09-01
 tags: [mysql, reference]
 description: 尚硅谷 MySQL 学习笔记

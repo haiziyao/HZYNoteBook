@@ -116,7 +116,7 @@
   },
   "realtimeSync": false,
   "startupSyncDelaySeconds": 0,
-  "autoSyncIntervalSeconds": 300,
+  "autoSyncIntervalSeconds": 0,
   "ai": {
     "providers": {},
     "yolo": false

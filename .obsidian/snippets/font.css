@@ -1,42 +1,33 @@
-/* ===== 1. 优先加载 CDN 版 LXGW WenKai ===== */
-@import url("https://cdn.jsdelivr.net/npm/lxgw-wenkai-webfont@1.7.0/style.min.css");
-
-/* ===== 2. 本地兜底字体：需要用户系统已安装 LXGW WenKai ===== */
+/* 本机安装仓库中的 LXGWWenKai-Regular.ttf 后即可离线使用，无需 CDN。 */
 @font-face {
   font-family: "LXGW WenKai Local";
   src: local("LXGW WenKai"),
-       local("LXGW WenKai Regular"),
-       local("LXGW WenKai Screen");
+       local("LXGWWenKai-Regular"),
+       local("霞鹜文楷");
   font-weight: 400;
   font-style: normal;
   font-display: swap;
 }
 
-/* ===== 3. Obsidian 字体变量 ===== */
-body {
-  --font-text: "LXGW WenKai", "LXGW WenKai Local", "Microsoft YaHei", sans-serif !important;
-  --font-interface: "Microsoft YaHei UI", "Segoe UI", sans-serif !important;
-  --font-monospace: "Consolas", "Cascadia Code", monospace !important;
+/* 字体设置只作用于笔记内容，侧边栏和界面沿用主题设置。 */
+.markdown-source-view,
+.markdown-preview-view {
+  --font-text: "LXGW WenKai Local", "LXGW WenKai", "PingFang SC", "Microsoft YaHei", sans-serif !important;
+  --font-monospace: "SFMono-Regular", Menlo, Monaco, "Consolas", "Cascadia Code", monospace !important;
 }
 
-/* ===== 4. 编辑模式正文 ===== */
+/* 正文字体通过继承生效，避免覆盖图标、数学公式和代码的专用字体。 */
 .markdown-source-view .cm-content,
-.markdown-source-view .cm-line,
-.markdown-source-view .cm-line * {
-  font-family: "LXGW WenKai", "LXGW WenKai Local", "Microsoft YaHei", sans-serif !important;
+.markdown-preview-view {
+  font-family: var(--font-text) !important;
 }
 
-/* ===== 5. 阅读模式正文 ===== */
-.markdown-preview-view,
-.markdown-preview-view * {
-  font-family: "LXGW WenKai", "LXGW WenKai Local", "Microsoft YaHei", sans-serif !important;
-}
-
-/* ===== 6. 代码块保持等宽字体 ===== */
-code,
-pre,
-.cm-inline-code,
-.HyperMD-codeblock,
-.HyperMD-codeblock * {
-  font-family: "Consolas", "Cascadia Code", monospace !important;
+/* 编辑模式、阅读模式中的代码保持等宽字体。 */
+.markdown-rendered code,
+.markdown-rendered pre,
+.markdown-rendered pre *,
+.markdown-source-view .cm-inline-code,
+.markdown-source-view .HyperMD-codeblock,
+.markdown-source-view .HyperMD-codeblock * {
+  font-family: var(--font-monospace) !important;
 }

@@ -1,5 +1,5 @@
 ---
-title: MySQL 高级篇参考资料
+title: MySQL高级特性分为4个篇章
 date: 2026-09-01
 tags: [mysql, reference]
 description: 尚硅谷 MySQL 学习笔记
