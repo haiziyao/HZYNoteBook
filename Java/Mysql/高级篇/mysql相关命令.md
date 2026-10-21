@@ -1,5 +1,5 @@
 ---
-title: MySQL 相关命令
+title: mysql
 date: 2026-09-01
 tags: [mysql]
 description: 尚硅谷 MySQL 学习笔记

@@ -1,5 +1,5 @@
 ---
-title: MySQL 架构篇（参考）
+title: 第04章_逻辑架构
 date: 2026-09-01
 tags: [mysql, reference]
 description: 尚硅谷 MySQL 学习笔记

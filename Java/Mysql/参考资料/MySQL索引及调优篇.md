@@ -1,5 +1,5 @@
 ---
-title: MySQL 索引及调优篇（参考）
+title: 第06章_索引的数据结构
 date: 2026-09-01
 tags: [mysql, reference]
 description: 尚硅谷 MySQL 学习笔记
