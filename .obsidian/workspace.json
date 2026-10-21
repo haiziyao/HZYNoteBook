@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "手撕/设计模式 -- 手撕.md",
+                "file": "📝 日常记录/2026-10/10-12-实习前的最后一天.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "设计模式 -- 手撕"
+              "title": "10-12-实习前的最后一天"
             }
           }
         ]
@@ -55,7 +55,7 @@
             "state": {
               "type": "search",
               "state": {
-                "query": "",
+                "query": "tag:面经",
                 "matchingCase": false,
                 "explainSearch": false,
                 "collapseAll": false,
@@ -125,7 +125,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "手撕/设计模式 -- 手撕.md",
+                "file": "📝 日常记录/2026-10/10-12-实习前的最后一天.md",
                 "followCursor": true,
                 "showSearch": false,
                 "searchQuery": ""
@@ -216,6 +216,18 @@
   },
   "active": "ceec933ddd1b76dd",
   "lastOpenFiles": [
+    "CS/计算机组成原理/1.计算机系统简介.md",
+    "CS/计算机组成原理/2.计算机历史.md",
+    "CS/计算机组成原理/3.总线.md",
+    "CS/计算机组成原理",
+    "面经/2026-9-面试/小红书-电话面-2026-8-31晚上11点.md",
+    "📝 日常记录/2026-10/10-12-实习前的最后一天.md",
+    "📝 日常记录/第一次意识到, '自杀'是指自己亲手杀死了自己.md",
+    "面经/2026-9-面试/2026-09-07-小红书-Java后端一面.md",
+    "📝 日常记录/2026-9/9.28.md",
+    "📝 日常记录/2026-10",
+    "📝 日常记录/2026-9/未命名",
+    "手撕/设计模式 -- 手撕.md",
     "面试补漏/中间件/ES/README.md",
     "README.md",
     "TF-IDF与BM25 讲解稿.md",
@@ -241,20 +253,8 @@
     "Attachment/Pasted image 20261001201333.png",
     "Attachment/Pasted image 20261001201312.png",
     "场景题/大量数据/分而治之.md",
-    "📚 专业领域/政治/马原/资料收集.md",
-    "📝 日常记录/第一次意识到, '自杀'是指自己亲手杀死了自己.md",
     "场景题/大量数据",
-    "场景题",
-    "📝 日常记录/未命名.md",
-    "📝 日常记录/2026-9/9.28.md",
-    "📝 日常记录/2026-9/9.14.md",
-    "📝 日常记录/2026-9/9.3.md",
-    "📝 日常记录/2026-9/9.1 - 新的起点, 长期主义.md",
-    "💡 个人思考/我, HZY, 对这个世界恶心.md",
     "未命名.canvas",
-    "未命名 1.md",
-    "💡 个人思考/钟氏情碍",
-    "💡 个人思考/人物传记",
     "Attachment/Pasted image 20260919022935.png",
     "Java/Mysql/高级篇/images/SQL_Execution_Flow.jpg",
     "Java/Mysql/高级篇/images/workbench_executingplan.png",
