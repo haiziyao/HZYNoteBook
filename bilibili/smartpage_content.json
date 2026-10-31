@@ -1,0 +1,526 @@
+# 用户查询需求说明（MCP v2，2026.10.25）
+
+> 文档按「口径 → 结论 → 资产 → 明细 → 附录」组织。本版 v2.2 在 9 月 + 10 月全量 16,067 条真实问题基础上，按 UV 优先、PV 次之重排需求，并把可合并的管理侧需求并入现有需求。
+
+
+## 编写规则
+
+- 每条需求只归属一个 tool；需要组合调用的写成「先 A 后 B」。
+- 语料局限：MCP v1 侧未获取用户原始自然语言，分析对象均为 Agent 改写后传入 search 的问题，不能直接等同于用户原始需求。
+- PV / UV：PV 按调用问题记录计次，同一用户多次调用计多次；UV 按用户去重，跨月合并重新去重，不跨需求相加。
+- 排序规则：在工具内按 UV 降序，UV 相同按 PV 降序；优先级综合使用量与业务价值判定。MCP v1 侧占比以 16,067 条记录为分母，管理侧单独统计。
+- 管理侧边界：管理侧主要由管理员使用，可见未发布知识；后续合并进 MCP v2 后，对于非管理员应当仅能够返回已发布且当前用户有权限访问的知识及关联信息。
+- 验收示例：优先取自实际语料，区分 Agent 改写问题、管理侧原始提问与调用入参；补充设计用例单独标注。
+
+---
+
+## 一、口径说明
+
+<table>
+  <colgroup><col width="100"/><col width="752"/></colgroup>
+  <thead><tr><th>项目</th><th>口径</th></tr></thead>
+  <tbody><tr><td>数据来源</td><td>MCP v1 用户侧调用日志；管理侧 admin_lookup_knowledge 2,069 次调用单独统计，不计入本文 PV/UV</td></tr><tr><td>统计周期</td><td>2026 年 9 月、10 月；9 月 4,609 条，10 月 11,458 条</td></tr><tr><td>清洗规则</td><td>已过滤仅含库名的不完整表名；测试调用与重复调用剔除规则待补（Q-04）</td></tr><tr><td>调用方区分</td><td>按 Agent 标识区分；argus、lumina、实验 agent 分别统计</td></tr><tr><td>分类方法</td><td>以逐条输入输出标注为基础，叠加问题文本规则交叉判定；高置信 86.2%，中 7.0%，低 6.8%（Q-05）</td></tr><tr><td>多意图计数</td><td>按主意图计一次；合并后的新需求按其主意图归入对应需求，不重复计数</td></tr><tr><td>PV</td><td>同一用户多次提问计多次；9 月 + 10 月直接相加</td></tr><tr><td>UV</td><td>全量去重用户 314 人（9 月 183 人，10 月 259 人）</td></tr><tr><td>优先级规则</td><td>P0：UV ≥ 100，或 PV ≥ 1,000 且 UV ≥ 50；P1：UV ≥ 20；P2：其余。排序仍按 UV 降序、PV 降序</td></tr><tr><td>未归类</td><td>300 条（1.9%）、68 UV；合并 NEW-02/03 后，原「不确定」中的可识别部分已归入对应需求</td></tr></tbody>
+</table>
+
+
+---
+
+## 二、结论
+
+### 2.1 汇总
+
+工具定义：
+
+表召回：用户尚不知道准确表名，仅提供业务描述、关键词、字段、指标或筛选条件时，检索并返回可能符合需求的候选表、匹配理由和关键属性，帮助用户选表。它负责“找到哪张表”，不把候选表直接认定为最终答案。
+
+表点查：用户已提供明确的表名或表 URN 时，查询指定表是否存在，并返回其已登记的结构、字段、属性及表级血缘。用户只问某一项时，优先返回该项；同名表无法唯一确定时，返回候选供用户选择。产出任务仅在有可核验的关联数据时返回，不依据表名或血缘自行推断。
+
+元数据查询：用户要查询字段、任务、指标、维度、枚举、业务过程等非表实体时，按名称、标识或所属域定位实体，返回已登记的定义、属性及可核验的关联关系。它负责回答“这个实体是什么、与什么有关”；已知物理表的结构和属性交给表点查，需要先寻找物理表的请求交给表召回。
+
+按 tool：
+
+<table>
+  <colgroup><col width="142"/><col width="86"/><col width="114"/><col width="80"/><col width="100"/></colgroup>
+  <thead><tr><th>tool</th><th>需求条数</th><th>PV</th><th>UV</th><th>占总 PV</th></tr></thead>
+  <tbody><tr><td>表点查 TL</td><td>6</td><td>7,359</td><td>277</td><td>45.8%</td></tr><tr><td>元数据查询 MQ</td><td>16</td><td>5,676</td><td>148</td><td>35.3%</td></tr><tr><td>表召回 TR</td><td>6</td><td>1,368</td><td>116</td><td>8.5%</td></tr><tr><td>不做</td><td>10</td><td>1,364</td><td>103</td><td>8.5%</td></tr><tr><td>不确定</td><td>—</td><td>300</td><td>68</td><td>1.9%</td></tr><tr><td>合计</td><td>38</td><td>16,067</td><td>712</td><td>100%</td></tr></tbody>
+</table>
+
+
+按优先级：
+
+<table>
+  <colgroup><col width="80"/><col width="86"/><col width="114"/><col width="80"/><col width="100"/></colgroup>
+  <thead><tr><th>优先级</th><th>需求条数</th><th>PV</th><th>UV</th><th>占总 PV</th></tr></thead>
+  <tbody><tr><td>P0</td><td>6</td><td>12,761</td><td>293</td><td>79.4%</td></tr><tr><td>P1</td><td>8</td><td>1,017</td><td>112</td><td>6.3%</td></tr><tr><td>P2</td><td>14</td><td>625</td><td>64</td><td>3.9%</td></tr><tr><td>不做</td><td>10</td><td>1,364</td><td>103</td><td>8.5%</td></tr><tr><td>不确定</td><td>—</td><td>300</td><td>68</td><td>1.9%</td></tr><tr><td>合计</td><td>38</td><td>16,067</td><td>640</td><td>100%</td></tr></tbody>
+</table>
+
+
+### 2.2 需求清单
+
+编号规则：工具简称 + 两位序号，序号按 UV 排序顺序在每个工具内连续编号（TL-01、TL-02…；TR-01…；MQ-01…）。
+
+按 UV 降序、UV 相同按 PV 降序排列。合并说明列写明并入的新需求。
+
+<table>
+  <colgroup><col width="102"/><col width="111"/><col width="301"/><col width="109"/><col width="333"/><col width="65"/><col width="48"/><col width="64"/><col width="83"/></colgroup>
+  <thead><tr><th>工具类型</th><th>编号</th><th>需求</th><th>传给工具的参数是否是用户原始自然语言</th><th>输入 → 输出</th><th>PV</th><th>UV</th><th>优先级</th><th>是否支持</th></tr></thead>
+  <tbody><tr><td>表点查（TL）</td><td>TL-01</td><td>通过表标识查询结构、关联任务和表级血缘</td><td>否</td><td>表名/URN → 字段结构、关联任务摘要、上下游表；</td><td>2,959</td><td>184</td><td>P0</td><td>是</td></tr><tr><td></td><td>TL-02</td><td>通过表标识查询字段结构</td><td>否</td><td>表名 / URN → 字段、类型、注释、分区、主键、指标</td><td>2,594</td><td>170</td><td>P0</td><td>是</td></tr><tr><td></td><td>TL-03</td><td>通过表标识查询登记状态和基础信息</td><td>否</td><td>表名 / URN → 登记状态、规范表名、所属库、表描述</td><td>1,618</td><td>142</td><td>P0</td><td>是</td></tr><tr><td></td><td>TL-04</td><td>通过表标识查询owner和更新属性</td><td>否</td><td>表名 → owner、空间、分层、更新频率、TTL</td><td>69</td><td>23</td><td>P1</td><td>是</td></tr><tr><td></td><td>TL-06</td><td>通过表标识查询存储路径和格式</td><td>否</td><td>表名 → 路径 / 格式；</td><td>17</td><td>8</td><td>P2</td><td>是</td></tr><tr><td>需消岐（先TR后TL）</td><td>TL-05</td><td>通过业务别名定位表并查询结构</td><td>是</td><td>业务别名 → 真实表名、结构、字段</td><td>102</td><td>9</td><td>P2</td><td>是</td></tr><tr><td>表召回（TR）</td><td>TR-01</td><td>通过业务描述查找候选表</td><td>是</td><td>业务描述 / 裸关键词 → 表 / 指标 / 维度 / 术语候选</td><td>947</td><td>107</td><td>P0</td><td>是</td></tr><tr><td></td><td>TR-02</td><td>按表类型和关键词筛选候选表</td><td>否</td><td>表类型 + 关键词 → 候选表清单</td><td>99</td><td>36</td><td>P1</td><td>是</td></tr><tr><td></td><td>TR-03</td><td>按数据源、分层或格式筛选表</td><td>否</td><td>数据源、分层、格式 → 表清单</td><td>55</td><td>27</td><td>P1</td><td>是</td></tr><tr><td></td><td>TR-04</td><td>通过字段或指标查找关联表</td><td>否</td><td>字段名 / 指标名 → 命中表清单</td><td>67</td><td>20</td><td>P1</td><td>是</td></tr><tr><td></td><td>TR-05</td><td>按数据库查询库表清单</td><td>否</td><td>库名 → 表清单</td><td>25</td><td>15</td><td>P2</td><td>是</td></tr><tr><td></td><td>TR-06</td><td>按owner查询其负责的表</td><td>否</td><td>owner → 表清单（分页、可过滤）</td><td>175</td><td>8</td><td>P2</td><td>是</td></tr><tr><td>元数据查询(MQ)</td><td>MQ-01</td><td>通过指标名称查询指标口径</td><td>是</td><td>指标名 / 别名 → 定义、公式、源表、SQL 模板</td><td>783</td><td>76</td><td>P0</td><td>是</td></tr><tr><td></td><td>MQ-02</td><td>通过任务标识查询基础信息和调度配置</td><td>是</td><td>任务 ID / 名称 → 元数据、调度、输入输出表</td><td>3,860</td><td>71</td><td>P0</td><td>是</td></tr><tr><td></td><td>MQ-03</td><td>通过表和字段查询字段含义及码值</td><td>是</td><td>字段名 → 字段含义、枚举／码值、使用说明</td><td>114</td><td>32</td><td>P1</td><td>是</td></tr><tr><td></td><td>MQ-04</td><td>通过维度标识查询定义和关联字段</td><td>是</td><td>维度名 / ID → 定义、枚举、绑定字段</td><td>158</td><td>30</td><td>P1</td><td>是</td></tr><tr><td></td><td>MQ-05</td><td>（任务血缘）通过任务标识查询上下游任务</td><td>是</td><td>任务 ID → 上下游任务 / 表</td><td>134</td><td>25</td><td>P1</td><td>是</td></tr><tr><td></td><td>MQ-06</td><td>按业务域检索可访问的业务知识</td><td>是</td><td>业务域 → 指标 / 维度 / 标签 / 表知识</td><td>321</td><td>22</td><td>P1</td><td>是</td></tr><tr><td></td><td>MQ-07</td><td>（字段血缘）通过表和字段查询上下游字段</td><td>是</td><td>表名 + 字段 → 上游字段与加工逻辑</td><td>148</td><td>18</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-08</td><td>通过名称查询业务过程或业务实体的定义与关系</td><td>是</td><td>业务过程 / 实体名 → 定义、绑定关系</td><td>48</td><td>15</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-09</td><td>通过观远资产标识查询属性和血缘</td><td>是</td><td>看板 / 数据集 → 元数据、血缘、关联表</td><td>61</td><td>13</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-10</td><td>通过任务标识查询输入表和产出表</td><td>是</td><td>任务 ID → 输入表、产出表</td><td>31</td><td>11</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-11</td><td>按名称查询 SQL 模板、业务术语或业务规则</td><td>是</td><td>SQL 模板、业务术语、业务规则</td><td>17</td><td>8</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-12</td><td>通过任务标识组合查询属性和关联关系</td><td>是</td><td>任务 ID → 元数据 + 输入输出 + 血缘</td><td>1</td><td>1</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-13</td><td>精确查询知识实体</td><td>是</td><td>实体 ID，或实体类型＋英文名＋可选业务域 → 权限范围内的实体详情及可选关系</td><td>-</td><td>-</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-14</td><td>按实体类型和业务域查询知识清单</td><td>是</td><td>实体类型＋业务域 → 分页实体清单</td><td>-</td><td>-</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-15</td><td>按实体类型查询知识清单</td><td>是</td><td>实体类型 → 权限范围内的分页实体清单</td><td>-</td><td>-</td><td>P2</td><td>是</td></tr><tr><td></td><td>MQ-16</td><td>按业务域查询知识清单</td><td>是</td><td>业务域 → 带实体类型的分页实体清单</td><td>-</td><td>-</td><td>P2</td><td>是</td></tr></tbody>
+</table>
+
+
+#### 典型提问
+
+##### TL-01 通过表标识查询结构、关联任务和表级血缘
+
+- “ai.scenario_unify_trace_log 的表结构、产出任务和上下游血缘”
+- “查询 Hive 表 b_ads.ads_socl_mbhv_community_flow_env_cube_1d_d 的完整表结构、字段列表、分区字段、存储格式、表描述，以及这张表的产出任务和上游血缘”
+- “b_dwb.dwb_ctnt_arch_interact_stat_redis_a_hr 的表结构、产出任务和上下游血缘”
+
+##### TL-02 通过表标识查询字段结构
+
+- “查询 Hive 表 ai.bi_itvn_abnormal_case 的全部字段：字段名、字段注释、是否分区”
+- “查 b_dwd.dwd_socl_reply_send_action_basic_arch_detail_i_hr 表和 b_dwd.dwd_socl_fav_action_basic_arch_detail_i_hr 表的字段，确认版本字段是 version_code 还是 build，以及是否有 pid/mid/buvid 字段”
+- “查询 Hive 表 b_dwb.dwb_flow_tm_trackid_show_click_play_i_d 的完整表结构（字段名、类型、注释），重点确认 flow_type、is_inner_ad、is_vshow、vshow_time、is_click、click_time、mid、avid、log_date 这些字段是否存在及其类型和注释”
+
+##### TL-03 通过表标识查询登记状态和基础信息
+
+- “查询 Hive 表 b_ods.ods_datapipe_pipeline 是否存在，给出它的库、表名和表描述”
+- “表 b_dm_live.dwd_prty_memb_behav_live_double_click_i_d 是否存在？存在时给出库名表名等基本信息。”
+- “b_dwb.dwb_flow_tm_trackid_show_click_play_i_d 天马曝光点击天表在知识库的 DT 登记与字段知识情况，是否存在表知识”
+
+##### TL-04 通过表标识查询 owner 和更新属性
+
+- “查询表 bi_sycpb.ads_brand_showclickcallup_pvuv_a_hr 的 owner”
+- “b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d 表的表级元数据信息：数据保留时长 duration、更新周期、全量还是增量”
+- “查询表 bili_bdp.dwd_archer_job_history 的表详情，包括生命周期 duration 和存储策略”
+
+##### TL-05 通过业务别名定位表并查询结构
+
+以下是口语化表名的真实输入；尚不能据此认定这些名称已登记为业务别名，命中多张表时需要返回候选供用户确认。
+
+- “BDO 社区核心宽表 表结构 字段”
+- “直播B端流水大宽表的完整表结构：哪个表含 stream_type、mcn_user_type、ruid、mid、room_id、pay_coin、rev_coin 字段（消费送礼流水明细），主播营收流水底表，用户×主播粒度流水表”
+- “稿件基础宽表 是否出海字段 is_abroad 海外出海 1-是 0-否 字段名与枚举”
+
+##### TL-06 通过表标识查询存储路径和格式
+
+- “查询表 tmp_thumb_gaia_report_filtered 的元数据信息，包括所属数据库、表 owner、存储路径 location”
+- “KFC 表 Kfc_ai.kfc_default_db.forward_video_rec_batch 的物理存储路径和 HDFS location”
+- “b_ods.rods_s_archive_play_click_l_hr 表的元数据：分区保留期、存储格式、字段列表（device/build/from_spmid/did）”
+
+##### TR-01 通过业务描述查找候选表
+
+- “搜索表名或表描述中包含「资源位」或「创作者中心」的 Hive 表”
+- “稿件日粒度播放量净增量统计的标准表，每天每个稿件的播放净增量存在哪张表”
+- “稿件粒度天马展点数据，视频卡片天马曝光点击，UGC 稿件推荐流量点击率，有哪些表”
+
+##### TR-02 按表类型和关键词筛选候选表
+
+- “全站大盘日活跃用户 DAU 去重设备数 日汇总表有哪些”
+- “搜索曝光表 搜索展示日志表 search show exposure 明细”
+- “有没有集合了用户最近一段时间所有观看内容和后续互动行为的宽表？比如包含用户观看历史、播放行为、点赞、评论、投币等互动行为汇总的用户行为宽表”
+
+##### TR-03 按数据源、分层或格式筛选表
+
+- “FileSet_ai 数据源下与 video_rec 或 batch_recall 相关的表”
+- “bili_ogv 库中短剧相关的表，表名包含 duanju 或 short 或 短剧 的 dwd 层表”
+- “owner 为 lixuemei01 的 Hive 表中，存储格式 tableType 为 textfile 的表有哪些？只列出 tableType=textfile 的表，返回其库名、表名；orc、parquet、iceberg 等其他格式的表不要返回”
+
+##### TR-04 通过字段或指标查找关联表
+
+- “哪些表包含 msource 字段?msource 字段的格式是什么,如何从中解析带货 UP 主、内容类型和内容 ID?”
+- “哪些表的字段中包含 visible_unit_id 这个字段名”
+- “播放计数次数（met_cnsm_play_cnt）和播放计数时长（met_cnsm_play_duration）指标来自哪些表？点赞、评论、投币、收藏、分享等互动指标来自哪些表？”
+
+##### TR-05 按数据库查询库表清单
+
+- “查询 bili_search 库下所有的表列表,包括表名和表描述”
+- “tmp_bdp 库下表名包含 video_activity_a_d 的表有哪些”
+- “srmadmin 库下有哪些表”
+
+##### TR-06 按 owner 查询其负责的表
+
+- “查询表 owner 为 lizhenhua 的所有 Hive 表列表，返回每张表的库名、表名、所属空间”
+- “owner 为 lixuemei01 的 Hive 表列表，请返回第 2 页数据（第 1 页已有 100 条，跳过前 100 条，返回剩余的表）”
+- “负责人是 huangxinyi06 的全部表，第2页，排除 dws 和 ads 层，列出 ods、dwd、dim 层的表”
+
+##### MQ-01 通过指标名称查询指标口径
+
+- “投放消耗 cash_spend 指标口径定义 硬编码单价折算 sigmob 芒果DSP 爱思助手”
+- “流量域原子指标「点击次数」met_click_cnt 的口径定义、所属业务过程、绑定源表和关联SP”
+- “播放人数 去重播放用户数 播放UV 指标定义 DISTINCT_COUNT MET 指标口径”
+
+##### MQ-02 通过任务标识查询基础信息和调度配置
+
+- “查询任务 9635317 的基本信息、调度配置和依赖配置”
+- “查询任务 9101531 的元数据信息：任务名称、任务类型（批任务还是流任务）、所属项目、负责人”
+- “查询任务 ID 9138503 的任务详情、责任人 yangshukai、任务类型、所属项目”
+
+##### MQ-03 通过表和字段查询字段含义及码值
+
+- “b_dws.dws_flow_cnsm_user_consume_detail_wide_1d_d 的 content_type 字段包含哪些枚举值，视频、直播、稿件分别是什么值”
+- “表 b_ads.ads_socl_mbhv_boss_bdo_index_1d_d 字段 dm_send_type 的枚举含义（1/2/3/4 分别代表什么弹幕发送类型）”
+- “b_dws.dws_flow_session_summary_wide_1d_d 表的 non_rec_play_session_cnt 字段是什么含义？”
+
+##### MQ-04 通过维度标识查询定义和关联字段
+
+- “在社区互动域中搜索：互动行为来源标识 operate_source 维度定义，TV助手来源，点赞收藏等互动行为的来源字段有哪些表和字段”
+- “在直播域中搜索：直播间队列类型维度（room_type），取值营收队列/电商队列/内容队列，用于天马直播多队列拆分监控，是否存在近似的维度定义”
+- “搜索 DIM 维度：流量场景、流量来源、from_scene、from_section——推荐分发场景（天马/ugc相关推荐/story/搜索/热门）的维度定义”
+
+##### MQ-05 通过任务标识查询上下游任务
+
+- “任务ID 9698232 atlas_table_usage_daily 的输出表是什么,上下游血缘关系”
+- “查询 BSK 任务 9697872（T24-DAU消耗LTV报表）的输出表全名、输入表列表，以及该输出表有哪些下游消费任务或报表”
+- “查询任务 9430900（server_click，搜索展点数据产出任务）的上游依赖任务 upstreamJobs 列表”
+
+##### MQ-06 按业务域检索可访问的业务知识
+
+- “在用增（用户增长）业务域中搜索：用增相关的指标、维度、标签、表知识，以及业务域本身的定义”
+- “在live域中搜索：主播优质模型送审无分数原因（reason/reason_detail，如预审信息不匹配）相关的指标、维度、业务规则或字段知识”
+- “在增长域中搜索指标/维度/业务规则：DAU内容归因、热点口径、非超高活首播口径、内容归因逻辑（付费投放/端外触达/站内首播优先级归因）”
+
+##### MQ-07 通过表和字段查询上下游字段
+
+- “查询表 bili_bi.dws_prty_up_potential_up_final_a_d 中 is_pub_30d、is_remove、is_flow_pool 的字段级上游血缘：字段对应来源表、来源列、计算表达式。只读查询；若字段血缘或SQL未记录请明确返回缺失，不从名称推断。”
+- “查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 tid_name 字段的字段级血缘：哪些下游任务/表使用了该字段”
+- “查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 tid、sub_tid_name、new_tid_name、new_sub_tid_name 这几个字段各自的字段级血缘下游字段（downstreamFields），以及引用这些字段的任务”
+
+##### MQ-08 通过名称查询业务过程或业务实体的定义与关系
+
+- “查询 BP 业务过程原子 2086714263314649089（点踩）和 2086714262899412993（点赞）的完整定义：cname、描述、CONTAIN_DT 三层表绑定（atomic_model / DWD / ODS 层表及过滤条件）、包含指标”
+- “弹幕有哪些业务过程和业务实体？请列出弹幕相关的业务过程（BP）和业务实体（BE）”
+- “稿件 业务实体 be_ctnt_arch”
+
+##### MQ-09 通过观远资产标识查询属性和血缘
+
+- “查询 urn:datacenter:guanyuanPage:v7dc732d8dcaa4e9384d9818 这个观远看板实体的元数据，包括 cardNames、dsNames 字段内容”
+- “查询 guanyuanDataset 数据集 urn:datacenter:guanyuanDataset:qaf56df935aab471484b589b 的详情：数据集名称、SQL、引用的上游物理表列表”
+- “查询实体 urn:datacenter:guanyuanPage:hedd284752cb34ae9b55a674 （entityId 11922442，观远BI页面【BI】-OTT商业化收入数据）的血缘上下游关系，上游包括哪些数据集(dataset)和哪些物理表”
+
+##### MQ-10 通过任务标识查询输入表和产出表
+
+- “llm_asr_hotwords 任务 9333329 详情，同步的源表和目标表是什么”
+- “任务 搜索热词屏蔽 9327314 的输入表和输出表是什么，血缘关系”
+- “任务 9699918 维度一_UP主内容适配分 的输入表和输出表、表级血缘关系”
+
+##### MQ-11 按名称查询 SQL 模板、业务术语或业务规则
+
+- “SQL模板 下发明细宽表通用查询 common_sp_user_consume_detail_wide_query 完整SELECT语句 聚合方式 分区条件”
+- “负向管控 违规类型 业务术语分类：色情、版权、低俗、涉政等违规原因的大模块分类体系在知识库中是否有收录？稿件管控原因类型”
+- “播放相关的业务规则 有效播放的判定规则”
+
+##### MQ-12 通过任务标识组合查询属性和关联关系
+
+- “查询任务「keeper_tag公共标签数据入仓」（job_id 014388，beastJob，URN urn:datacenter:beastJob:164491291206001）的任务详情，包括任务类型、调度配置、责任人、上下游血缘”
+- “查询任务「keeper_data_domain_biz_module_relation同步」（archerJob，URN urn:datacenter:archerJob:9701915）的详情和上下游血缘关系，包括源表和目标表”
+- “archer 任务 9493775 和 9347332 的详情，产出什么表，上游依赖什么表”
+
+以下四项为管理侧实际查询入参，可作为调用验收样本；正式写成“用户典型提问”前，仍需补充对应的自然语言语料。
+
+##### MQ-13 精确查询知识实体
+
+- 按 atomId 查询：{"atomIds":["2086714433192349697"]}
+- 按类型、业务域和英文名查询：{"atomType":"MET","domain":"content-consume","enName":"net_online_play_cnt"}
+- 按类型、业务域和英文名查询：{"atomType":"BP","domain":"interact","enName":"like"}
+
+##### MQ-14 按实体类型和业务域查询知识清单
+
+- {"atomType":"BP","domain":"miaoer-growth","pageSize":1}
+- {"atomType":"DT","domain":"interact","pageSize":100}
+- {"atomType":"MET","domain":"interact","pageSize":5}
+
+##### MQ-15 按实体类型查询知识清单
+
+- {"atomType":"BP","pageSize":60}
+- {"atomType":"DT","pageSize":200}
+- {"atomType":"BT","pageSize":200}
+
+##### MQ-16 按业务域查询知识清单
+
+- {"domain":"growth","pageSize":200,"withRelations":true}
+- {"domain":"interact","pageSize":200}
+- {"domain":"content-consume","pageSize":200}
+
+### 2.3 不做清单
+
+<table>
+  <colgroup><col width="80"/><col width="154"/><col width="183"/><col width="123"/><col width="392"/></colgroup>
+  <thead><tr><th>来源</th><th>本期不做的具体请求</th><th>原因</th><th>后续承接</th><th>例子</th></tr></thead>
+  <tbody><tr><td>N-01</td><td>查询“数据专辑包含哪些表”</td><td>在keeper中已核到数据专辑实体，但未核到专辑→表的成员关系，无法查询到数据专辑中包含的表</td><td>资产目录补齐关系后评估</td><td>① “数据专辑 urn:datacenter:dataAlbum:1350018 包含哪些表”<br>② “查询数据专辑 urn:datacenter:dataAlbum:1350018 中包含的数据资产(表、任务)列表”</td></tr><tr><td>N-02</td><td>查权限、授权结果、配额、资源成本</td><td>工作空间元数据不能替代权限和资源系统的实时结论</td><td>权限/资源平台</td><td>① “查询 bili_sycpb.dwd_spark_trade_order_info_a_d 这张 Hive 表当前有哪些用户/审批工单拥有 read 权限，权限持有人的用户列表和所属部门”<br>② “查询工作空间 sycpb_algo、sycpb_ad_fee、query_space、sycpb_data 的 yarnCpu、hdfsQuota、kafkaQuota、lancerQuota、flinkCpu 配额值”<br>③ “数据资产成本 计算存储资源成本 成本中心 成本归属分摊”</td></tr><tr><td>N-03</td><td>Kafka 集群运行状态、消费组、权限</td><td>Keeper 的 Kafka 静态元数据不能证明这些运行信息可查</td><td>Kafka 平台</td><td>① “查询工作空间 bdpgj（数据平台部-工具组）在 Kafka 集群 Kafka_jscs02-databus-kafka-common01 下有权限的数据库列表”<br>② “查询 kafka topic r_rtd.rtd_attr_inner_koc_search 的表级下游血缘：有哪些下游任务和消费组在消费这个 topic”</td></tr><tr><td>N-04</td><td>DQC 实时执行结果与告警</td><td>已登记规则定义不等于规则运行结果</td><td>DQC 平台</td><td></td></tr><tr><td>N-05</td><td>按代码片段跨任务查找任务</td><td>Keeper 虽登记 Archer command，但真实任务不保证返回；尚未验证跨任务代码全文检索能力，Spark 参数和 JAR 路径也未见稳定独立属性</td><td>任务平台、代码仓库；完成接口与权限核验后再评估</td><td>① “查找哪些 bsk/Berserker 任务（尤其是 python 脚本任务）的代码或配置中涉及 hotword_manager_backend_list 这个字眼，包括表名、topic 名或变量名包含 hotword_manager_backend_list 的任务”<br>② “哪个数据同步任务的配置或 command 中包含路径 /department/ai/recsys/recindexing/prod/unify/video_rec_batch_recall_local”</td></tr><tr><td>N-06</td><td>回答任意平台的完整操作手册、流程与治理规定</td><td>Atlas 有 FAQ，但不能据此保证覆盖所有平台规范，且规范需要持续维护</td><td>帮助中心/文档问答</td><td>“lumina 是谁,是用户账号还是智能助手,在数据平台中的角色”<br>“数据地图表详情页表名旁边的「草稿」状态标识是什么含义？同步任务产出的 Hive 表为什么显示草稿，如何转正？”<br>“数据同步任务自动创建的 Hive 草稿表 draft table 如何转正为正式表?草稿表发布流程,数据地图表详情草稿徽标的判定条件”<br>“Berserker 数据平台中创建禁用态（disabled/冻结）任务的规范：任务创建时如何保持禁用状态？任务分组与依赖配置有什么要求？冻结/解冻任务的规范是什么？”<br>“数据地图表详情页表名旁边的「草稿」状态标识是什么含义？同步任务产出的 Hive 表为什么显示草稿，如何转正？”</td></tr><tr><td>N-07</td><td>实时告警、任务实例诊断与失败原因</td><td>基线基础属性不能回答实时运行问题</td><td>运维/调度系统</td><td>① “查询基线链路失败告警详情，alarmUuid=7661db9ee762410d9100d1d16afcba1e，需要基线名称、关联任务、破线时间、失败实例信息”<br>② “查询任务实例 INSTANCE_1027331229（application_1688369676084_65804237，任务 UGC人群_copy jobId 9700132）的 YARN Driver 失败日志详情，我需要看到 User application exited with status 后面的完整状态码以及 SQL 解析报错堆栈”</td></tr><tr><td>N-08</td><td>数据样本、实时行数、实时新鲜度</td><td>需要查询引擎、权限和实时性保证</td><td>查询引擎、数仓服务</td><td>① “airflow_migrate_job_history 表中 job_status 字段的数据取值,成功状态是哪个值?请给出该表的数据样例”<br>② “查询表 b_dwb.dwb_prty_creator_external_high_potential_wide_a_w 的分区列表（log_date 最新分区值）和每个分区的行数统计”<br>③ “查询 TiDB 表 reply.reply（数据源 TiDB_main-reply-jscs02_reply）的表行数统计信息”</td></tr><tr><td>N-09</td><td>按已知任务获取完整 SQL、脚本、Spark 参数及 JAR 路径</td><td>Keeper 虽登记 Archer command，但真实任务不保证返回；尚未验证跨任务代码全文检索能力，Spark 参数和 JAR 路径也未见稳定独立属性</td><td>任务平台、代码仓库；完成接口与权限核验后再评估</td><td>① “job 任务 ID 9683337 名称为"三级标签品类OKR解析表" 属于工作空间 bdp_dw_co，请返回该任务的线上 SQL 脚本全文 text_sql 字段内容”<br>② “查询任务 9699918 维度一_UP主内容适配分 的任务配置、SQL 代码和 spark 参数”</td></tr><tr><td>N-10</td><td>问有关Lumina的使用情况</td><td>在Keeper和Atlas知识库中无法找到该类信息</td><td>后续评估如何引导用户不要问这类问题</td><td>“lumina agent skill 调用记录 使用统计”<br>“Lumina agent skill 使用记录、调用日志相关表,包含 skill 名称、调用次数、专家名称等字段”<br>“lumina agent skill 使用统计 官方专家 调用次数 最近7天”<br>“lumina 会话 消息 工具调用 明细表”</td></tr><tr><td>N-11</td><td>模糊的自然语言请求</td><td>无法精确的定位用户的需求</td><td>引导用户把问题问清楚</td><td>“当前部门信息表是哪一张？部门信息相关的表有哪些？”</td></tr></tbody>
+</table>
+
+
+---
+
+## 三、数据资产全览
+
+<table>
+  <colgroup><col width="85"/><col width="247"/><col width="191"/><col width="255"/><col width="226"/><col width="177"/></colgroup>
+  <thead><tr><th>资产类型</th><th>Keeper中可查属性</th><th>Atlas中可查属性</th><th>Keeper中可查关系</th><th>Atlas中可查关系</th><th>对应Tool（哪些tool会用到这样的资产）</th></tr></thead>
+  <tbody><tr><td>表</td><td>表名、库、描述、owner、空间、数据源、生命周期（duration）；<br>更新周期、表类型、存储路径、格式、粒度等依表的二级类型提供</td><td>业务别名、粒度、使用名称、描述、别名、owner、更新频率、表类型、粒度、TTL、使用指南；表分层</td><td>字段（属性联查）、上下游表、指标、维度、API、标签、人群、基线、观远数据集、模型、特征组；产出/消费任务</td><td>字段、业务过程、业务实体主表、SQL 模板、埋点事件、关联知识</td><td>表召回 / 表点查 / 元数据查询</td></tr><tr><td>字段</td><td>字段名、类型、注释、取值说明、分区/主键标记、安全等级；</td><td>数据类型、字段角色、计算逻辑、使用说明、枚举值、分区标记、主键标记；上游字段属性仅内部登记</td><td>所属表（属性联查）、上下游字段、指标、维度、API、标签、观远字段<br>字段血缘的 builder 可提供任务线索</td><td>所属表、指标、维度、枚举、关联知识</td><td>表召回 / 表点查 / 元数据查询</td></tr><tr><td>任务</td><td>任务名、类型、owner、登记状态、空间；项目、调度周期、cron、重试配置、SLA、command 等依任务类型及实际记录提供</td><td>无</td><td>上下游任务、API、基线、UDF；表/字段血缘中的任务 builder 线索</td><td>无</td><td>元数据查询 / 表点查</td></tr><tr><td>指标</td><td>名称、描述、类型、依赖字段等，依指标实体类型提供</td><td>名称、定义／描述、数据类型、单位、指标类型、聚合方式、计算表达式、衍生说明、粒度限制</td><td>关联表、关联字段</td><td>绑定字段、基础/衍生指标、限定维度、所属业务过程、关联知识；可经字段定位来源表</td><td>元数据查询 / 表召回 / 表点查</td></tr><tr><td>维度</td><td>名称、描述、类型、依赖字段等，依维度实体类型提供</td><td>名称、定义／描述、数据类型、维度用途、是否通用参数；属性类型</td><td>关联表、关联字段</td><td>绑定字段、枚举、业务过程、业务实体、指标、埋点参数</td><td>元数据查询 / 表召回 / 表点查</td></tr><tr><td>枚举</td><td>无</td><td>枚举值、含义、使用场景、描述</td><td>无</td><td>所属维度、引用字段、父子枚举、关联知识</td><td>表点查 / 元数据查询</td></tr><tr><td>观远平台（卡片、数据集、报表）</td><td>名称、描述、owner、状态、数据集 SQL、行列数、刷新 cron、卡片类型、图表类型、页面信息</td><td>无</td><td>表→数据集→卡片→报表；字段→观远字段</td><td>无</td><td>元数据查询</td></tr><tr><td>数据源</td><td>名称、类型、描述、owner、空间；部分类型登记集群、地址、端口、配置等属性</td><td>无</td><td>数据库、表、工作空间（通过数据源标识、名称和空间属性联查）</td><td>无</td><td>表召回 / 元数据查询</td></tr><tr><td>数据库</td><td>库名、描述、数据源类型、库归属类型、空间、创建人、创建/修改时间</td><td>无</td><td>表、数据源、工作空间（属性联查，需结合数据源标识定位）</td><td>无</td><td>表召回 / 元数据查询</td></tr><tr><td>基线</td><td>名称、owner、SLA、优先级、状态、预警/截止时间等已登记配置</td><td>无</td><td>关联表、关联任务；所属空间（属性联查）</td><td>无</td><td>元数据查询</td></tr><tr><td>Api</td><td>名称、描述、API 编号、owner、SLA、空间；实例名称、绑定版本号</td><td>无</td><td>关联表、字段、任务、API 实例</td><td>无</td><td>元数据查询</td></tr><tr><td>标签</td><td>名称、owner、空间、创建/修改时间</td><td>无</td><td>关联表、字段、人群；所属空间（属性联查）</td><td>无</td><td>元数据查询</td></tr><tr><td>业务过程（BP）</td><td>无</td><td>名称、定义、过程性质、流程步骤</td><td>无</td><td>指标、主体/客体业务实体、维度、数据表、埋点事件</td><td>元数据查询 / 表召回</td></tr><tr><td>业务实体（BE）</td><td>无</td><td>名称、定义、实体标识、实体类型</td><td>无</td><td>业务过程、维度、其他业务实体、主数据表</td><td>元数据查询</td></tr><tr><td>业务术语（BT）</td><td>无</td><td>名称、定义、相似术语</td><td>无</td><td>知识引用关系</td><td>元数据查询 / 表召回/表点查</td></tr><tr><td>业务规则（BR）</td><td>无</td><td>名称、定义、规则类型、计算表达式、实现说明</td><td>无</td><td>知识引用关系</td><td>元数据查询</td></tr><tr><td>SQL 模板（SP）</td><td>无</td><td>名称、描述、SQL 内容、SQL 方言、参数、适用场景、输出示例</td><td>无</td><td>依赖数据表、知识引用关系</td><td>元数据查询</td></tr><tr><td>问答案例（FAQ）</td><td>无</td><td>问题、答案、分类、难度、关键词、适用角色、解决步骤、参考链接</td><td>无</td><td>知识引用关系</td><td>元数据查询</td></tr><tr><td>埋点位置（SPM）</td><td>无</td><td>名称、描述、位置层级、业务线、页面、模块、位置标识、业务公参清单</td><td>无</td><td>关联埋点事件、知识引用关系</td><td>元数据查询</td></tr><tr><td>埋点事件（TE）</td><td>无</td><td>名称、描述、事件类型、埋点类型、触发条件、采样率、事件等级、日志标识、来源服务、处理链路</td><td>字典登记了北极星埋点实体，但未登记对应的完整关系</td><td>埋点位置、上报策略、埋点参数、业务过程、数据表、知识引用关系</td><td>元数据查询</td></tr><tr><td>埋点参数（TC）</td><td>无</td><td>名称、描述、参数层级、数据类型、是否必传、默认值、枚举值、处理链路、SDK 兼容说明</td><td>无</td><td>所属埋点事件、映射维度、知识引用关系</td><td>元数据查询</td></tr><tr><td>上报策略（TS）</td><td>无</td><td>名称、描述、策略分类、触发条件、参数规则、约束条件、示例</td><td>无</td><td>关联埋点事件、知识引用关系</td><td>元数据查询</td></tr></tbody>
+</table>
+
+
+## 四、需求明细
+
+### 通用处理约定
+
+- 三个 Tool 均只读：
+    - 不执行 SQL、不修改表、任务或知识。
+    - 需要其他系统处理的请求返回 rejected、原因与可用的跳转入口；
+    - 复合请求允许已支持部分成功，整体标记 partial。
+- 同名、多域或不完整标识无法唯一定位时，返回候选及匹配依据；有可信评分时附 matched/score，由用户通过 parsed_refs 澄清，不擅自选择第一条。
+- 批量对象逐项给状态；结果过大时返回明确的截断标记和继续查询方式，total 仅在底层能可靠提供时返回。翻页保持筛选条件和排序稳定。
+- “未检索到”“未登记”“属性为空”“无权限”“关系未核实”分别表达。Atlas 知识及关系只返回当前用户有权限且已发布、并在当前消费场景可见的内容；不能沿用管理侧可见未发布知识的范围。
+
+### 1、找表
+
+包含需求场景：TR-01 业务描述／关键词召回，TR-02 表类型筛选，TR-03 数据源／分层／格式筛选，TR-04 字段／指标反查表，TR-05 按库查表，TR-06 按 owner 查表。所有分支的主输出都是候选表清单。
+
+#### C-01｜按描述、关联实体或筛选条件返回候选表
+
+覆盖编号：TR-01、TR-02、TR-03、TR-04、TR-05、TR-06。
+
+<table>
+  <colgroup><col width="86"/><col width="839"/></colgroup>
+  <thead><tr><th>卡片项目</th><th>需求明细</th></tr></thead>
+  <tbody><tr><td>Tool</td><td>表召回</td></tr><tr><td>优先级</td><td>P0：TR-01；P1：TR-02、TR-03、TR-04；P2：TR-05、TR-06</td></tr><tr><td>输入</td><td>①业务描述、裸关键词；②表类型＋关键词；③数据源、数仓分层或存储格式；④字段名／字段标识，或指标名／指标标识；⑤库名；⑥owner。支持明确提出的以上其他类型的条件组合、分页和返回字段选择。</td></tr><tr><td>输出</td><td>主结果为去重的候选表清单：规范表名、库、表 URN／唯一标识、匹配理由；<br>按需附描述、数据源、owner、分层、格式等已登记属性，以及分页／截断标记。</td></tr><tr><td>处理逻辑</td><td>识别找表意图及各筛选条件<br>→规范化数据源、类型、库、owner 等标识<br>→检索表属性或经已登记字段／指标关系反查表<br>→按权限过滤、去重、排序、分页。<br>不同条件默认取交集；<br>用户明确给出的“或”条件按并集处理。<br>关键词命中与实体关系命中分别标注。</td></tr><tr><td>边界情况</td><td>①业务描述过宽；②同名库／数据源无法唯一定位；③字段或指标名反查表无法唯一定位；④无全条件匹配但有部分匹配；⑤复合请求超出找表输出。具体例子和处理方式见下表。</td></tr><tr><td>不负责</td><td>执行 SQL、读取样本、确认实时数据量；<br>替用户断言某候选表一定满足业务口径；<br>读取表结构和完整血缘；<br>按库名直接枚举所有数据库；<br>反向按存储路径找表。</td></tr><tr><td>依赖资产</td><td>Keeper：表 tab 的名称／描述／dsName／dsType／dbName／owner／modelLevel／tableType 等按表型存在的属性；字段 col.tabUrn；已登记表／字段与指标的关系。<br>Atlas：DT、FIELD、MET 及 DIM／BT 等候选知识；FIELD→DT、FIELD→MET 等实际关系。Atlas 表分层在消费侧的可见性、Keeper 各表型过滤能力及反向遍历须随对应分支验收。</td></tr></tbody>
+</table>
+
+
+##### 边界情况
+
+下表中的 F 编号对应本卡片的真实语料验收用例；其余例子为设计情形。
+
+<table>
+  <colgroup><col width="299"/><col width="400"/><col width="494"/></colgroup>
+  <thead><tr><th>边界情况</th><th>具体例子</th><th>正确处理方案</th></tr></thead>
+  <tbody><tr><td>给出的唯一标识错误，找不到相关表</td><td>“查询owner为2333的所有表”<br>“查询包含字段名为ziduan的表”</td><td>应该说明没有该owner或该字段名或该业务过程等等，然后返回用户可能想要的正确输入，引导用户进行正确的输入</td></tr><tr><td>业务描述过宽，候选过多</td><td>“弹幕”</td><td>返回带资产类型、表名、描述和匹配依据的分页候选；<br>有可靠评分时附 matched／score。不要替用户选第一张表。用户补充域、分层或粒度后再收窄。</td></tr><tr><td>同名库或数据源无法唯一定位</td><td>“查询 Hive 数据库 tmp_test_ai_infra 是否存在，以及该库下所有的表清单”<br>【设计前提】两个 Hive 数据源存在同名库。</td><td>返回“数据源＋库”的可见候选列表及区分信息，让用户选择目标；选定前不混合两个库的表，也不宣称已列出全部表。</td></tr><tr><td>根据字段、指标名找表无法唯一定位</td><td>“哪些表包含 msource 字段?msource 字段的格式是什么,如何从中解析带货 UP 主、内容类型和内容 ID?”<br>“播放计数次数 play_cnt 指标绑定在哪些表的字段上 SQL模板内容”</td><td>字段查询返回“库表＋字段”候选；<br>指标查询先返回域、指标标识和别名命中情况，再给各指标实际关联表的候选列表与关系路径。用户选择目标后继续，不默认取第一项。</td></tr><tr><td>全条件无命中，但存在部分匹配</td><td>“列出 Kafka 数据源 r_bdp_platform 数据库下所有 tpp 开头的表名”<br>【设计前提】该库下有 Kafka 表，但没有 tpc 前缀；其他库有 tpc 前缀表。</td><td>先明确“当前范围无同时满足数据源、库和前缀的表”。<br>可另列“部分匹配候选”，逐表标明已满足和未满足的条件，供用户决定是否调整；不得把这些表放入全匹配结果。用户明确排除其他结果时不展示部分匹配候选。</td></tr><tr><td>复合请求超出找表输出</td><td>“弹幕相关的数据表有哪些，包括ODS层和DWD层的表名、产出任务和来源服务”</td><td>先返回候选表与分层证据；选定表后交给表点查／元数据查询。任务或来源服务没有可靠关联时单独标记，整体可为 partial。</td></tr></tbody>
+</table>
+
+
+##### 验收用例
+
+<table>
+  <colgroup><col width="86"/><col width="214"/><col width="424"/><col width="400"/></colgroup>
+  <thead><tr><th>编号</th><th>覆盖场景</th><th>验收输入及来源</th><th>预期结果</th></tr></thead>
+  <tbody><tr><td>F-01</td><td>业务描述 → 候选表</td><td>“查询日志表，记录每条SQL执行的表名、用户、执行时间、耗时的明细表“<br>“lumina 表”<br>“表名包含 lumina 的 Hive 表，agent 会话 session expert 专家”<br>【真实提问·用户侧第 159 行】</td><td>返回符合 SQL 执行明细语义的表候选和匹配依据；若仅名称相似，说明匹配依据不足，不保证具备全部所需字段。</td></tr><tr><td>F-02</td><td>表类型＋关键词；</td><td>搜索表名或表描述中包含「资源位」或「创作者中心」的 Hive 表<br>【真实提问·用户侧第 119 行】</td><td>结果限定 Hive 表，并满足“资源位或创作者中心”的名称／描述条件；标明各表命中的关键词。</td></tr><tr><td>F-03</td><td>数据源＋库＋前缀</td><td>列出 Kafka 数据源 r_bdp_platform 数据库下所有 tpc 开头的表名<br>【真实提问·用户侧第 3468 行】</td><td>同时满足数据源、库和表名前缀；只返回静态表元数据，不解释 Kafka 运行状态。</td></tr><tr><td>F-04</td><td>分层筛选；混合输出</td><td>弹幕相关的数据表有哪些，包括ODS层和DWD层的表名<br>lumina 专家 agent 会话 宽表 表名<br>【真实提问·用户侧第 7894 行】</td><td>分别列出已登记为 ODS、DWD 层的弹幕候选表；</td></tr><tr><td>F-05</td><td>格式＋owner 严格过滤</td><td>owner 为 lixuemei01 的 Hive 表中，存储格式 tableType 为 textfile 的表有哪些？只列出 tableType=textfile 的表，返回其库名、表名；orc、parquet、iceberg 等其他格式的表不要返回<br>【真实提问·用户侧第 9770 行】</td><td>仅返回确认 tableType=textfile 且 owner 命中的表；排除其他格式及格式未知的表，不把 Hive 类型当作 textfile 格式。</td></tr><tr><td>F-06</td><td>字段反查表</td><td>哪些表包含 msource 字段?msource 字段的格式是什么,如何从中解析带货 UP 主、内容类型和内容 ID?<br>【真实提问·用户侧第 704 行】</td><td>返回登记包含 msource 字段的表及命中字段；字段格式说明有登记才返回，解析方法未登记时说明缺失，不现场编造业务解析规则。</td></tr><tr><td>F-07</td><td>指标反查表；</td><td>查找指标 met_click_cnt 绑定的数据表；若只查到指标，也列出指标候选。<br>【补充设计用例】</td><td>按明确指标→字段→表或已登记指标→表关系返回表清单和路径；没有表绑定时返回带 MET 类型的候选并说明关联表未登记。</td></tr><tr><td>F-08</td><td>数据库 → 表清单</td><td>查询 Hive 数据库 tmp_test_ai_infra 是否存在，以及该库下所有的表清单<br>【真实提问·用户侧第 49 行】</td><td>区分“库已登记但无可见表”“未检索到库”“无权限”；有结果时返回该数据源下的库表清单，不能据此确认物理库一定存在。</td></tr><tr><td>F-09</td><td>owner；分页</td><td>owner 为 lixuemei01 的 Hive 表列表，请返回第 2 页数据（第 1 页已有 100 条，跳过前 100 条，返回剩余的表）<br>【真实提问·用户侧第 9774 行】</td><td>沿用上一页 owner 和 Hive 条件，跳过已返回记录；本页不重复、不漏掉稳定排序后的下一段；无上一页上下文则明确补齐分页条件。</td></tr><tr><td>F-10</td><td>无命中／属性缺失</td><td>查找 Hive 表，owner=example_owner，存储格式=example_format。<br>【补充设计用例】</td><td>在空结果基准集下返回无匹配表及实际筛选条件；若筛选属性未采集，说明覆盖限制，不能当作全库不存在。</td></tr><tr><td>F-11</td><td>权限／同名库</td><td>列出 analytics 库所有表。<br>【补充设计用例】</td><td>在两个数据源均存在 analytics 的基准集中先返回可见数据源供消歧；权限受限时不暴露不可见表，也不输出“该库不存在”。</td></tr></tbody>
+</table>
+
+
+### 2、找表的信息
+
+包含需求场景：TL-01 表结构＋任务摘要＋表级血缘，TL-02 字段结构，TL-03 登记状态与基础信息，TL-04 owner／更新属性，TL-05 业务别名定位表，TL-06 存储路径／格式。共同前提是已知或能够唯一定位表。
+
+#### C-02｜根据表标识查询已登记的属性、结构和关联信息
+
+覆盖编号：TL-01、TL-02、TL-03、TL-04、TL-05、TL-06。
+
+<table>
+  <colgroup><col width="86"/><col width="836"/></colgroup>
+  <thead><tr><th>卡片项目</th><th>需求明细</th></tr></thead>
+  <tbody><tr><td>Tool</td><td>表点查</td></tr><tr><td>优先级</td><td>P0：TL-01、TL-02、TL-03；P1：TL-04；P2：TL-05、TL-06。</td></tr><tr><td>输入</td><td>①完整表名或表 URN；②表名＋指定字段；③已登记的业务别名。</td></tr><tr><td>输出</td><td>定位结果＋所请求的信息块。<br>基础信息：规范表名、库、描述；结构：字段名、类型、注释、分区／主键标记及已绑定指标；<br>字段解释：含义、已登记枚举及来源；归属／更新：owner、空间、分层、登记的更新频率和 TTL；<br>存储：路径、格式；<br>关联：有证据的产出任务摘要、上下游表及方向。<br>每个信息块可分别标记成功、未登记或无权限。</td></tr><tr><td>处理逻辑</td><td>解析表／字段唯一标识→优先精确定位，必要时消歧→按用户选择读取属性及关系→合并 Keeper 与 Atlas 结果，保留来源及冲突→只返回所请求信息。<br>表级血缘按上游／下游分组；<br>任务摘要须验证表血缘 builder 等实际关联的端点及方向，不能根据名称推断。</td></tr><tr><td>边界情况</td><td>①表名不完整、同名或别名多义；②单个 URN 写成集合语法；③批量查询多个 URN；④表未检索到；⑤未登记上游表或下游表；⑥未登记产出任务或消费任务；⑦部分表属性缺失。具体例子和处理方式见下表。</td></tr><tr><td>不负责</td><td>用物理查询确认表存在；查真实行数、最新分区数据或实际数据新鲜度；从字段类型推导业务枚举；保证每张表都有产出任务；从表名推断 lancer 任务；通过路径反查表；提供任务完整代码。</td></tr><tr><td>依赖资产</td><td>Keeper：tab、col 及 col.tabUrn 属性联查，表级血缘有效记录、可验证的任务 builder 标识，表／字段与指标／维度关系；不同 sec_type 的属性各自校验。Atlas：DT 业务别名及更新属性、FIELD 定义／枚举／计算说明、FIELD→DT／MET／DIM／ENUM 等实际关系。字段级血缘和业务口径全文分别由 C-04、C-06 承接。</td></tr></tbody>
+</table>
+
+
+##### 边界情况
+
+<table>
+  <colgroup><col width="265"/><col width="336"/><col width="474"/></colgroup>
+  <thead><tr><th>边界情况</th><th>具体例子</th><th>正确处理方案</th></tr></thead>
+  <tbody><tr><td>表名不完整、同名或别名多义</td><td>“社区核心宽表 字段清单”</td><td>返回候选表的规范库表名、数据源、描述和匹配依据，要求用户选定；未唯一定位前不拼接不同表的属性或血缘。</td></tr><tr><td>一个 URN 写成集合语法</td><td>“urn in ('urn:datacenter:tab:Hive1.b_dwb.dwb_ctnt_arch_interact_stat_redis_a_hr')”</td><td>解析集合中的唯一 URN，按单表请求处理；不把整个表达式当表名，也不误判为多表批量查询。</td></tr><tr><td>批量查 URN</td><td>“urn in ('urn:datacenter:tab:Hive1.b_dwb.dwb_ctnt_arch_interact_stat_redis_a_hr', 'urn:datacenter:tab:Hive1.ai.follow_uplt_vvvt_next7d_merge')”</td><td>解析多个 URN，批量去重查询并按输入顺序逐表返回 found／not_found／partial 等状态；某表失败不影响其他表。结果过大时给 total、truncated=true 和分页入口，不静默截断。</td></tr><tr><td>用户要查的表不存在</td><td>“Hive 表 felix_hive_db.felix_table_005 是否存在？只需回答存在或不存在，存在时给出表元数据。”</td><td>返回 not_found，明确是“当前可访问元数据中未检索到登记”；不据此断言物理库中绝对不存在，也不返回近名表的详情冒充命中</td></tr><tr><td>用户要查的表没有上游表或下游表</td><td>“查询 Hive 表 bi_ogv.dim_ai_donghua_up_list 的下游表列表（表级血缘，即以该表为上游直接或间接产出的表），以及 b_dim.dim_socl_short2x_playletminiapp_sourcefrom_info 和 b_dim.dim_socl_short2x_playletminiapp_info_d 这两张表的上游表是否包含 bi_ogv.dim_ai_donghua_up_list”</td><td>按上游／下游方向分别返回已核实的边；无边方向写“当前可见血缘未登记”，不能说绝对没有血缘，也不能由相似表名推断关系。若请求多跳，标明查询深度。</td></tr><tr><td>用户要查的表没有上游任务或下游任务</td><td>“查询表 b_dm_live.dwd_trad_goods_sku_a_d 的下游任务列表,即血缘上以该表作为输入表(读取该表)的所有任务”</td><td>分别核查产出任务与消费任务的关系端点、方向及 builder；某方向没有已登记关系时返回空列表并标“当前未登记／关系未核实”，保留另一方向的已知结果。若继续查关联任务的上下游任务，先确认任务标识，再由元数据查询处理。</td></tr><tr><td>用户想查的表属性缺失</td><td>“查询表 b_ads.ads_ctnt_arch_basic_arch_bi_region_a_d 的表结构、字段列表、更新频率、产出任务”</td><td>逐属性返回有值的登记结果；缺失项标“未登记／未采集”，整体可为 partial。不得用 mtime 代替更新频率，或把 Keeper duration 未经单位核实地换算成 Atlas TTL；字段清单关系缺失也不能解释为物理表没有字段。</td></tr></tbody>
+</table>
+
+
+##### 验收用例
+
+<table>
+  <colgroup><col width="86"/><col width="282"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>编号</th><th>覆盖场景</th><th>验收输入及来源</th><th>预期结果</th></tr></thead>
+  <tbody><tr><td>T-01</td><td>登记状态＋产出任务</td><td>查询表 b_ods.rods_s_app_ubt_player_iceberg_l_hr 是否存在，以及它的产出任务是什么（lancer入仓任务）<br>【真实提问·用户侧第 234 行】</td><td>先回答当前元数据范围的登记状态；只有核实表血缘 builder 与表端点后才返回任务，否则单独说明任务关系未核实。</td></tr><tr><td>T-02</td><td>单表 URN</td><td>urn in ('urn:datacenter:tab:Hive1.b_dwb.dwb_ctnt_arch_interact_stat_redis_a_hr')<br>【真实提问·用户侧第 4624 行】</td><td>只定位一个表，返回规范标识及可查基础信息，不误当多表批量查询。</td></tr><tr><td>T-03</td><td>字段结构及类型</td><td>查询表 b_dm_growth.dwb_visit_logined_mid_buvid_l_d 的表结构，我需要知道 log_date 分区字段的类型和格式（是 string 的 yyyyMMdd 还是 date 类型），以及 pid、mid 字段类型<br>【真实提问·用户侧第 417 行】</td><td>返回目标字段登记的类型、注释与分区标记；日期格式只有明确元数据证据才确认。</td></tr><tr><td>T-04</td><td>结构、更新频率与任务摘要</td><td>查询表 b_ads.ads_ctnt_arch_basic_arch_bi_region_a_d 的表结构、字段列表、更新频率、产出任务<br>【补充设计用例】</td><td>分块返回结构、更新属性和可核实任务；缺一项不影响其余结果，不能以 mtime 替代更新频率。</td></tr><tr><td>T-05</td><td>找表的字段</td><td>BDO 宽表的所有字段<br>【真实提问·用户侧第 1968 行】</td><td>先定位 BDO 宽表，再返回 pid 已登记的值及含义；别名多义先给候选。“全部取值”限定为已登记的值，不保证数据中所有实际取值。</td></tr><tr><td>T-06</td><td>owner、库、存储路径</td><td>查询表 tmp_thumb_gaia_report_filtered 的元数据信息，包括所属数据库、表 owner、存储路径 location<br>【真实提问·用户侧第 305 行】</td><td>返回已登记的库、owner、location；路径缺失时明确标记，不读取实际文件。</td></tr><tr><td>T-07</td><td>空间／分层／TTL</td><td>查询 b_dm_growth.dwb_visit_logined_mid_buvid_l_d 的 owner、空间、分层和 TTL。<br>【补充设计用例】</td><td>逐项输出已登记值及来源；TTL 若仅有 duration 原值且单位未核实，说明原值与单位未知；不按表名猜测分层。</td></tr><tr><td>T-08</td><td>存储路径</td><td>查询表 tmp_thumb_gaia_report_filtered 的元数据信息，包括所属数据库、表 owner、存储路径 location<br>【真实提问·用户侧第 371 行】</td><td>返回匹配表的库、owner 和已登记 location；缺路径时说明未登记，不能尝试读取目录中的文件。</td></tr><tr><td>T-09</td><td>存储格式</td><td>查询 b_dm_growth.dwb_visit_logined_mid_buvid_l_d 的存储格式。<br>【补充设计用例】</td><td>返回该表型中已核实的格式属性；没有属性或取值时标为未登记，不按表名猜测 Iceberg／ORC。</td></tr><tr><td>T-10</td><td>业务别名 → 结构</td><td>社区核心宽表 字段清单<br>【真实提问·用户侧第 2094 行】</td><td>有唯一明确别名映射时返回规范表名和字段；映射缺失或多义时给候选或提示补充，不把“社区核心宽表”直接当物理表名。</td></tr></tbody>
+</table>
+
+
+### 3、元数据查询
+
+包含需求场景：指标口径 MQ-01，维度 MQ-04，业务过程／实体 MQ-08，SQL 模板／术语／规则 MQ-11，域内知识 MQ-06，以及管理侧精确查询和三种清单 MQ-13～MQ-16。任务 MQ-02／MQ-05／MQ-10／MQ-12，字段 MQ-03／MQ-07，观远 MQ-09。三类分别成卡，查询对象均为非表实体。
+
+#### C-03｜根据任务标识返回属性、调度和已核实的血缘
+
+覆盖编号：MQ-02、MQ-05、MQ-10、MQ-12。
+
+<table>
+  <colgroup><col width="86"/><col width="844"/></colgroup>
+  <thead><tr><th>卡片项目</th><th>需求明细</th></tr></thead>
+  <tbody><tr><td>Tool</td><td>元数据查询。由表查产出任务时，先由表点查定位可靠的任务标识，再进入本卡片。</td></tr><tr><td>优先级</td><td>P0：MQ-02 任务详情；P1：MQ-05 上下游任务；P2：MQ-10 输入／产出表专查、MQ-12 任务全景组合。组合卡复用底层能力，不把 P2 表述为独立新链路。</td></tr><tr><td>输入</td><td>任务 ID、任务 URN 或任务名称；可补任务平台／类型、项目、空间；可选择基础属性、调度、输入表、输出表、上游任务、下游任务，或组合查询。</td></tr><tr><td>输出</td><td>任务唯一标识、平台、名称、类型、owner、项目／空间、已登记状态和适用的周期、cron、重试等配置；<br>已登记上下游任务；<br>能核实关系端点和方向时返回输入／产出表。组合查询逐块给出状态及来源。</td></tr><tr><td>处理逻辑</td><td>先确定平台与唯一任务→读取该任务类型适用的属性→按方向查询任务血缘→仅在表血缘 builder 与任务和表端点可核实时归入输入／产出表。<br>默认一跳；多跳展开去重、防环、标注截断。</td></tr><tr><td>边界情况</td><td>①任务没有已登记的上游任务或下游任务；②用户要求返回任务 SQL；③所请求的属性不适用于当前任务类型；④任务未检索到。具体例子和处理方式见下表。</td></tr><tr><td>不负责</td><td>保证完整 SQL、command、Spark 参数或 JAR 路径；<br>按代码片段跨任务搜索；<br>实时实例诊断、日志、失败原因；<br>修改任务及调度。超范围部分单独拒绝，已支持的元数据可部分返回。</td></tr><tr><td>依赖资产</td><td>Keeper：archerJob／saberJob／beastJob 等各自登记的实体属性；已登记任务→任务关系；表／字段血缘中实际有效的 builder_urn 关联。任务类型、属性和关系覆盖逐平台核验，不能把属性字典中登记 command 视为完整脚本可用。<br>Atlas 未核到独立任务实体及关系。</td></tr></tbody>
+</table>
+
+
+##### 边界情况
+
+<table>
+  <colgroup><col width="260"/><col width="350"/><col width="403"/></colgroup>
+  <thead><tr><th>边界情况</th><th>具体例子</th><th>正确处理方案</th></tr></thead>
+  <tbody><tr><td>任务没有上游任务或下游任务</td><td>“archerJob 任务 9555243 充电结算账单dwd明细表 的产出表 target 与下游任务 downstreamJobs”<br>【设计前提】任务可定位，但当前来源未查到下游任务边。</td><td>上游、下游分方向返回已核实的任务；<br>无边方向返回空列表，并标“当前可见任务血缘未登记”。<br>只有已确认该平台、该方向的血缘覆盖完整时，才可表述为“没有下游任务”；不得从另一平台或表→基线→任务关系推断依赖。</td></tr><tr><td>用户请求得到任务 SQL</td><td>“job 任务 ID 9683337 名称为"三级标签品类OKR解析表" 属于工作空间 bdp_dw_co，请返回该任务的线上 SQL 脚本全文 text_sql 字段内容”</td><td>完整 SQL／command 全文本期不返回：仅请求 SQL 时返回 rejected 和任务系统入口；同时请求基础属性、调度或血缘时，支持部分照常返回，SQL 部分单独 rejected，整体为 partial。Keeper 字典存在 command 字段，不代表该任务记录有完整 SQL。</td></tr><tr><td>请求的属性不适用于当前任务类型</td><td>“查询 archer 任务 atlas_table_usage_daily（jobId=9698232，项目 知识覆盖度数据看板 projectId=9131123）的任务详情，包括执行的 command 内容、spark jar 路径和参数、读取的输入表和输出表”</td><td>先核任务平台与类型，再逐属性查该类型的登记模式：不适用时标 not_applicable；类型适用但记录为空时标“未登记”；来源不可见时标“不可查”。不得借其他任务类型字段补值。完整 SQL 与 Spark 参数仍按本期不做规则单独处理。</td></tr><tr><td>用户查询的任务不存在</td><td>“查询产出任务 1 的任务元数据”<br>【设计前提】在可访问的任务类型和平台中均未检到该 ID。</td><td>先按用户给出的平台、类型和项目范围定位；仅给数字 ID 时核查可能的平台。仍无可见登记则返回 not_found，说明是“当前可访问元数据中未检索到任务”，不补造任务属性，也不把权限不可见断言为物理任务不存在。</td></tr></tbody>
+</table>
+
+
+##### 验收用例
+
+<table>
+  <colgroup><col width="86"/><col width="282"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>编号</th><th>覆盖场景</th><th>验收输入及来源</th><th>预期结果</th></tr></thead>
+  <tbody><tr><td>J-01</td><td>任务 URN／ID；单项属性</td><td>查询 archerJob 9634327 的 owner，urn 为 urn:datacenter:archerJob:9634327<br>【真实提问·用户侧第 22 行】</td><td>按 archerJob 平台及 ID 精确查询 owner；不要求用户补表名，也不强制返回任务全景。</td></tr><tr><td>J-02</td><td>任务名＋ID；输出表／血缘</td><td>任务ID 9698232 atlas_table_usage_daily 的输出表是什么,上下游血缘关系<br>【真实提问·用户侧第 50 行】</td><td>核对名称与 ID 一致后返回可验证的输出表、上下游任务；任务端点与表端点分别呈现，无法核实的关联明确缺失。</td></tr><tr><td>J-03</td><td>调度配置与 SQL 边界</td><td>查询调度任务 job_id 7478125（投币全业务原子模型）的任务详情：完整 SQL 代码、任务类型、调度周期、所属工作流、依赖配置<br>【真实提问·用户侧第 288 行】</td><td>返回已登记任务类型、周期、依赖；工作流关系未登记时标记缺口；完整 SQL 属不做范围。</td></tr><tr><td>J-04</td><td>任务全景组合及部分拒绝</td><td>查询 archer 任务 atlas_table_usage_daily（jobId=9698232，项目 知识覆盖度数据看板 projectId=9131123）的任务详情，包括执行的 command 内容、spark jar 路径和参数、读取的输入表和输出表<br>【真实提问·用户侧第 6 行】</td><td>基础属性和可核实输入／输出可返回；command、JAR、Spark 参数逐项标为本期不支持，整体 partial。</td></tr><tr><td>J-05</td><td>多跳任务血缘与环</td><td>查询 archerJob 9698232 的下游任务，继续展开两层。<br>【补充设计用例】</td><td>只沿下游展开两跳，去重、防环并标注截断；不混入上游任务。</td></tr></tbody>
+</table>
+
+
+#### C-04｜根据字段标识返回含义、取值及字段级血缘
+
+覆盖编号：MQ-03、MQ-07。
+
+<table>
+  <colgroup><col width="86"/><col width="860"/></colgroup>
+  <thead><tr><th>卡片项目</th><th>需求明细</th></tr></thead>
+  <tbody><tr><td>Tool</td><td>元数据查询</td></tr><tr><td>优先级</td><td>P1：MQ-03 字段含义、枚举／码值、使用说明；<br>P2：MQ-07 字段级血缘及加工逻辑。</td></tr><tr><td>输入</td><td>字段名／字段 URN，可补所属表名或表 URN；<br>可指定含义、取值、使用说明、上游／下游字段、加工说明、展开方向与层数。</td></tr><tr><td>输出</td><td>唯一字段的名称、所属表、类型、注释、已登记取值说明／结构化枚举及含义、使用说明；<br>查询血缘时返回上下游字段标识、所属表、方向、已登记的加工说明。属性与关系各自标来源及缺失状态。</td></tr><tr><td>处理逻辑</td><td>字段＋所属表共同消歧→读取 Keeper valueDesc 与 Atlas enum_values 等实际属性，不把普通说明转成未经登记的码值→按方向查询有效字段血缘→单独读取计算说明；多字段按对象分组、去重、防环。</td></tr><tr><td>边界情况</td><td>①只有通用字段名，无法唯一定位所属表；②字段已定位，但没有已登记的上游字段或下游字段；③请求的字段未检索到。具体例子和处理方式见下表。</td></tr><tr><td>不负责</td><td>检索所有任务 SQL 证明字段引用；推导未登记的计算公式；生成完整加工 SQL；保证获知字段的所有下游消费者；执行影响变更。</td></tr><tr><td>依赖资产</td><td>Keeper 有效字段血缘、col.tabUrn，及经验证的 builder 任务线索；<br>Atlas FIELD 的已登记加工说明。字段关系与表达式是两份证据，分别验收；不能因其中一项存在就保证另一项存在。</td></tr></tbody>
+</table>
+
+
+##### 边界情况
+
+<table>
+  <colgroup><col width="207"/><col width="362"/><col width="441"/></colgroup>
+  <thead><tr><th>边界情况</th><th>具体例子</th><th>正确处理方案</th></tr></thead>
+  <tbody><tr><td>只有通用字段名</td><td>“is_story 字段 含义”<br>【设计前提】多张可见表登记了 is_story 字段。</td><td>返回“库表＋字段”候选及类型、注释摘要和匹配依据，等待用户确认；不得默认选第一条，也不混合不同表的字段定义。第二轮用选定的表／字段标识继续查含义、取值或血缘。</td></tr><tr><td>字段无上游字段或下游字段</td><td>“只读查询字段上游血缘。实体urn精确等于 urn:datacenter:col:Hive1.bili_bi.dws_prty_potential_up_fuchi_i_d.is_fuchi。查询条件where仅允许urn。返回该字段的上游输入字段和计算表达式，查不到返回缺失。”<br>“查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 tid、sub_tid_name、new_tid_name、new_sub_tid_name 这几个字段各自的字段级血缘下游字段（downstreamFields），以及引用这些字段的任务”<br>【设计前提】字段已定位，但所查方向没有可见的有效字段血缘边。</td><td>按字段、方向分别返回已核实的边；没有边的方向返回空列表并标“当前可见字段血缘未登记／未采集”，不能说物理加工绝无上下游字段。另一方向或字段属性若有结果仍照常返回；计算表达式单独判断是否登记，不由字段名或说明反推血缘。</td></tr><tr><td>字段不存在</td><td>“查询 Hive 表 ai.dim_charge_video_d 的表结构，重点确认 charge_type、avid、log_date 字段是否存在及注释”</td><td>先确认所属表，再查表下的精确字段标识；仅该字段无可见登记时逐字段返回 not_found，说明“当前可访问元数据中未检索到该字段”。其他已找到字段照常返回，整体可为 partial；不能把字段未登记误说成整张表不存在，也不能用近名字段冒充命中。</td></tr></tbody>
+</table>
+
+
+##### 验收用例
+
+<table>
+  <colgroup><col width="86"/><col width="226"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>编号</th><th>覆盖场景</th><th>验收输入及来源</th><th>预期结果</th></tr></thead>
+  <tbody><tr><td>L-01</td><td>字段定义与业务含义</td><td>b_ads.ads_ctnt_arch_basic_ai_tags_category_okr_a_hr 表中 match_special_type_ip 字段的定义与业务含义</td><td>先定位表与字段，返回已登记注释／业务解释；没有业务定义时不由字段名猜测。</td></tr><tr><td>L-02</td><td>字段取值与含义</td><td>b_dws.dws_flow_cnsm_user_consume_detail_wide_1d_d 的 content_type 字段包含哪些枚举值，视频、直播、稿件分别是什么值</td><td>只返回该字段已登记枚举或取值说明及含义，区分结构化枚举与文字说明；不补造未登记映射。</td></tr><tr><td>L-03</td><td>业务别名＋字段码值</td><td>BDO 宽表 pid 字段 枚举值 含义 全部取值</td><td>先确认 BDO 宽表的唯一表标识；“全部”限定为已登记值，别名多义时先消歧。</td></tr><tr><td>L-04</td><td>上游字段与混合意图</td><td>bili_search.search_recommend_query_intent 表的字段列表和建表说明,特别是 top_tid_name、top_tid 字段的枚举值,'UP意图' 这个取值什么含义,来自哪个上游字段?</td><td>整表清单由表点查承接；字段取值及上游字段在本卡片分别核证，关系缺失时不反推来源。</td></tr><tr><td>L-05</td><td>下游字段／任务线索</td><td>查询字段级血缘:表 b_dwb.dwb_trad_ord_elec_order_detail_info_i_d 的 buy_month 字段被哪些下游任务消费引用</td><td>返回已登记下游字段及可核实 builder 任务线索；不声称覆盖所有 SQL 中的实际引用。</td></tr><tr><td>L-06</td><td>同名字段、无枚举和无血缘</td><td>查询 id 字段的全部码值和上游加工逻辑。</td><td>先列“表＋字段”候选；选定后将枚举缺失与血缘缺失分别反馈，不随机套用其他表的 id。</td></tr></tbody>
+</table>
+
+
+#### C-05｜根据观远资产标识查询属性和关联链路
+
+覆盖编号：MQ-09。
+
+<table>
+  <colgroup><col width="86"/><col width="866"/></colgroup>
+  <thead><tr><th>卡片项目</th><th>需求明细</th></tr></thead>
+  <tbody><tr><td>Tool</td><td>元数据查询。</td></tr><tr><td>优先级</td><td>P2：MQ-09。</td></tr><tr><td>输入</td><td>观远报表／看板、数据集或卡片的名称、ID、URN；可指定基础属性、数据集 SQL、关联卡片／报表、上游物理表等。</td></tr><tr><td>输出</td><td>对象类型、名称、标识及请求的已登记属性；沿物理表→数据集→卡片→报表返回可核实链路。数据集 SQL 仅在该属性实际登记、可见且被明确请求时返回。</td></tr><tr><td>处理逻辑</td><td>识别观远对象类型→精确定位或同名消歧→按请求方向读取实际关系边→多跳路径去重；cardNames、dsNames 属性摘要与真实关系分开呈现。</td></tr><tr><td>边界情况</td><td>链路缺边只返回可核实部分；SQL 属性为空不能由表名重建原 SQL。字段→观远字段虽有关系定义，观远字段缺少完整实体定义，不能承诺完整字段级影响分析。</td></tr><tr><td>不负责</td><td>查询看板的实时图表数据或访问量；执行数据集 SQL；编辑观远配置；保证所有 BI 资产或字段链路全覆盖。</td></tr><tr><td>依赖资产</td><td>Keeper guanyuanDataset、guanyuanCard、guanyuanPage 的属性，以及表→数据集、数据集→卡片、卡片→报表关系。关系定义已登记，实例边及方向仍须基准样本验证；Atlas 未核到上述独立观远实体关系。</td></tr></tbody>
+</table>
+
+
+##### 边界情况
+
+<table>
+  <colgroup><col width="203"/><col width="369"/><col width="380"/></colgroup>
+  <thead><tr><th>边界情况</th><th>具体例子</th><th>处理方案</th></tr></thead>
+  <tbody><tr><td>找不到对应的观远资产</td><td>“查询 guanyuanDataset 数据集 urn:datacenter:guanyuanDataset:d7b7352f0f8b64ffc8742961 的详情：数据集名称、数据源类型、SQL、引用的上游物理表列表”</td><td>先按观远资产类型和完整标识精确查找；无可见登记时返回 not_found，说明“当前可访问元数据中未检索到该观远数据集”，不返回其他数据集的属性或血缘冒充命中，也不据此断言观远平台中绝对不存在。</td></tr></tbody>
+</table>
+
+
+##### 验收用例
+
+<table>
+  <colgroup><col width="86"/><col width="282"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>编号</th><th>覆盖场景</th><th>验收输入及来源</th><th>预期结果</th></tr></thead>
+  <tbody><tr><td>B-01</td><td>报表 URN 与摘要属性</td><td>查询 urn:datacenter:guanyuanPage:v7dc732d8dcaa4e9384d9818 这个观远看板实体的元数据，包括 cardNames、dsNames 字段内容<br>【真实提问·用户侧第 1412 行】</td><td>精确定位报表，返回已登记 cardNames、dsNames；有实际边时列出卡片／数据集关系，没有边则不把摘要文本伪装成血缘。</td></tr><tr><td>B-02</td><td>数据集 SQL 与上游表</td><td>查询 guanyuanDataset 数据集 urn:datacenter:guanyuanDataset:qaf56df935aab471484b589b 的详情：数据集名称、SQL、引用的上游物理表列表<br>【真实提问·用户侧第 14564 行】</td><td>分别返回数据集名称、可见 SQL 属性与有证据的上游表；单项缺失独立标记。</td></tr><tr><td>B-03</td><td>卡片名称消歧</td><td>观远卡片 跳失率监控<br>【真实提问·用户侧第 1398 行】</td><td>按卡片类型搜索，多个同名对象返回候选；用户未指定字段时给基础摘要。</td></tr><tr><td>B-04</td><td>观远资产未找到</td><td>查询 guanyuanDataset 数据集 urn:datacenter:guanyuanDataset:d7b7352f0f8b64ffc8742961 的详情：数据集名称、数据源类型、SQL、引用的上游物理表列表<br>【补充设计用例】</td><td>返回 not_found 并注明查询范围；不以其他数据集的详情替代，也不把元数据未命中表述为平台资产绝对不存在。</td></tr></tbody>
+</table>
+
+
+#### C-06｜根据名称或标识查询业务知识定义及关联关系
+
+覆盖编号：MQ-01、MQ-04、MQ-08、MQ-11。
+
+<table>
+  <colgroup><col width="86"/><col width="862"/></colgroup>
+  <thead><tr><th>卡片项目</th><th>需求明细</th></tr></thead>
+  <tbody><tr><td>Tool</td><td>元数据查询。若主要目的是由指标或字段找到物理表，先走表召回；已知表的结构由表点查返回。</td></tr><tr><td>优先级</td><td>P0：MQ-01 指标口径；P1：MQ-04 维度定义；P2：MQ-08 业务过程／实体、MQ-11 SQL 模板／业务术语／业务规则。</td></tr><tr><td>输入</td><td>指标、维度、业务过程、业务实体、SQL 模板、业务术语或业务规则的名称、英文名、别名或实体标识；可补业务域、所属表／字段及需要的关联类型。</td></tr><tr><td>输出</td><td>共同输出：实体类型、名称、标识、业务域、定义及来源。<br>指标：公式／表达式、聚合方式、单位、粒度／过滤限制、已绑定字段／来源表、实际关联模板；<br>维度：定义、类型、已登记枚举、绑定字段／维表；<br>业务过程／实体：定义及已登记关联指标、维度、表／实体；<br>模板：登记的 SQL 内容、参数／使用限制；<br>术语／规则：登记定义、说明与关系。<br>各类输出均限实际存在且有权限的数据。</td></tr><tr><td>处理逻辑</td><td>按类型、域和标识定位→精确匹配优先，名称／别名多义则消歧→读取类型专属属性→只沿真实登记且当前可见的关系扩展。<br>指标来源表可经字段定位或 Keeper 指标表关系核实；模板需有实际引用关系，不能靠名称相似绑定。</td></tr><tr><td>边界情况</td><td>①所查实体未检索到；②实体存在但非必填属性无登记值；③指标跨域同名或别名相似；④定义存在但公式或模板未登记；⑤生产侧关系在消费场景不可见。具体例子和处理方式见下表。</td></tr><tr><td>不负责</td><td>计算指标当前数值、执行 SQL 模板；推导未登记公式或业务规则；返回任意平台手册全文、任务脚本或仓库源码；把知识标签与 Titan 标签互相替代。</td></tr><tr><td>依赖资产</td><td>Atlas MET、DIM、ENUM、BP、BE、SP、BT、BR、FIELD、DT 的属性及允许的关系；<br>Keeper 指标／维度与表／字段的关系可作补充证据。实际填充值、关系边、发布与权限需分别验证。</td></tr></tbody>
+</table>
+
+
+##### 边界情况
+
+<table>
+  <colgroup><col width="243"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>边界情况</th><th>具体例子</th><th>正确处理方案</th></tr></thead>
+  <tbody><tr><td>所查实体不存在</td><td>“点赞率 指标口径 点赞次数/播放次数 是否存在”<br>【设计前提】当前可访问且已发布的知识中未检索到该指标实体。</td><td>无可见登记时返回 not_found，明确查询范围。<br>不把名称相近的指标当作精确命中，也不根据“点赞次数/播放次数”自行生成官方指标定义。</td></tr><tr><td>非必填属性没有登记值</td><td>“在互动域中搜索：稿件点赞次数、点踩次数、收藏次数指标的口径定义、聚合方式、绑定字段”<br>【设计前提】指标定义和绑定字段已登记，但其中一个指标的聚合方式属性为空。</td><td>返回已登记的定义与绑定字段；只对缺值的聚合方式标“未登记”，注明来源，不把整个指标判为不存在，也不由指标名称猜测 SUM／COUNT 等聚合方式。多个指标逐个报告状态。</td></tr><tr><td>指标跨域同名或别名相似</td><td>“qvt 指标,别名 qvt,query vt,搜索人均观看时长,指标名称或别名中包含 qvt 的指标”<br>【设计前提】多个业务域登记了同名或近似别名的指标。</td><td>列出候选的业务域、规范名、别名和匹配依据；有可靠评分时再附 matched/score。用户选定实体后才返回对应口径，不自动选 top1，也不混合不同域的定义或公式。</td></tr><tr><td>定义存在，但公式或模板未登记</td><td>“流量域原子指标「点击次数」met_click_cnt 的口径定义、所属业务过程、绑定源表和关联SP”<br>【设计前提】指标定义已登记，但计算表达式或关联 SQL 模板的实例关系缺失。</td><td>正常返回定义和已核实的业务过程／源表关系；公式、模板分别标“未登记／关系未核实”，整体可为 partial。不把定义改写成官方公式，也不凭模板名称相似或共用表推定存在绑定。</td></tr><tr><td>生产侧关系在消费场景不可见</td><td>“业务过程 内容点击 atomId 2082435280237998082 CONTAIN_DT 绑定表 atomic_model DWD ODS 分层”<br>【设计前提】该 BP→表关系只在 Atlas 生产侧可见，当前用户处于消费场景。</td><td>按当前身份、发布状态和场景过滤；可见的业务过程定义照常返回，受限关系标“当前场景不可查看”，不泄露表端点或关系内容，也不误答“该过程没有绑定表”。需要查看时指向有权限的知识管理入口，不自动切换到生产侧。</td></tr></tbody>
+</table>
+
+
+##### 验收用例
+
+<table>
+  <colgroup><col width="80"/><col width="169"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>编号</th><th>覆盖场景</th><th>验收输入及来源</th><th>预期结果</th></tr></thead>
+  <tbody><tr><td>K-01</td><td>表上下文中的指标口径</td><td>dwb_flow_cnsm_content_comsume_middle_i_d 表 vv vt 指标口径<br>【V1 search 输入·第 2 行】</td><td>按表与指标绑定关系分别定位 vv、vt；无法验证绑定时先给候选，不套用其他表的同名指标。</td></tr><tr><td>K-02</td><td>指标定义、源表和模板</td><td>流量域原子指标「点击次数」met_click_cnt 的口径定义、所属业务过程、绑定源表和关联SP<br>【V1 search 输入·第 3031 行】</td><td>返回已登记定义、表达式及过程关系；源表和 SP 各给实际证据路径，缺项逐项标记。</td></tr><tr><td>K-03</td><td>指标别名与多候选</td><td>qvt 指标,别名 qvt,query vt,搜索人均观看时长,指标名称或别名中包含 qvt 的指标<br>【V1 search 输入·第 9730 行】</td><td>按名称／登记别名检索，区分精确与近似匹配；多域或多实体不任选 top1。</td></tr><tr><td>K-04</td><td>维度、枚举和字段绑定</td><td>在社区互动域中搜索：互动行为来源标识 operate_source 维度定义，TV助手来源，点赞收藏等互动行为的来源字段有哪些表和字段<br>【V1 search 输入·第 227 行】</td><td>在指定域定位维度；定义、枚举含义及绑定表字段均需各自登记证据，不以相似表名补全。</td></tr><tr><td>K-05</td><td>业务过程与指标</td><td>在内容消费域中搜索：播放计数业务过程 播放次数指标 口径定义 计算逻辑<br>【V1 search 输入·第 1245 行】</td><td>分别给业务过程和指标的定义与已登记关系，不把“播放次数”解释为要求计算当前数值。</td></tr><tr><td>K-06</td><td>业务实体</td><td>稿件 业务实体 be_ctnt_arch<br>【V1 search 输入·第 8759 行】</td><td>定位业务实体并给已发布且可见的定义与关系；生产侧专属关系在消费场景不返回。</td></tr><tr><td>K-07</td><td>SQL 模板内容</td><td>SQL模板 下发明细宽表通用查询 common_sp_user_consume_detail_wide_query 完整SELECT语句 聚合方式 分区条件<br>【V1 search 输入·第 271 行】</td><td>返回实际登记的模板内容及参数／约束；缺失时不补写“原 SELECT”，不执行模板。</td></tr><tr><td>K-08</td><td>业务规则</td><td>播放相关的业务规则 有效播放的判定规则<br>【V1 search 输入·第 3272 行】</td><td>返回已登记的规则定义、表达式与来源；未收录时不把模型推断当作正式规则。</td></tr><tr><td>K-09</td><td>业务术语</td><td>负向管控 违规类型 业务术语分类：色情、版权、低俗、涉政等违规原因的大模块分类体系在知识库中是否有收录？稿件管控原因类型<br>【V1 search 输入·第 5871 行】</td><td>仅回答知识库已收录的术语分类和定义，覆盖不全时指出缺口。</td></tr><tr><td>K-10</td><td>跨域同名与公式缺失</td><td>查询“点击次数”的公式和 SQL 模板。<br>【设计用例】</td><td>两个业务域均有同名指标时先消歧；公式或模板缺失独立标记，无权限内容不外泄。</td></tr></tbody>
+</table>
+
+
+#### C-07｜按业务域和实体类型检索知识或查询管理侧清单
+
+覆盖编号：MQ-06、MQ-13、MQ-14、MQ-15、MQ-16。
+
+<table>
+  <colgroup><col width="86"/><col width="870"/></colgroup>
+  <thead><tr><th>卡片项目</th><th>需求明细</th></tr></thead>
+  <tbody><tr><td>Tool</td><td>元数据查询。</td></tr><tr><td>优先级</td><td>P1：MQ-06 域内知识搜索；<br>P2 候选：MQ-13 精确查实体、MQ-14 类型＋域清单、MQ-15 类型清单、MQ-16 域清单。<br>管理侧调用量单独统计，不并入用户侧 PV／UV。</td></tr><tr><td>输入</td><td>MQ-06：业务域＋可选关键词／知识类别。<br>MQ-13：实体标识或实体类型＋英文名＋可选域，可批量。<br>MQ-14：类型＋域。<br>MQ-15：仅类型。<br>MQ-16：仅域。<br>清单支持分页，关系展开须显式要求。</td></tr><tr><td>输出</td><td>MQ-06 返回可访问的相关知识候选、类型、域、摘要和匹配依据；<br>MQ-13 返回逐实体详情及可见关系；<br>MQ-14～MQ-16 返回严格满足条件的分页实体清单，仅域查询也须带实体类型。<br>仅在可靠时给总数。</td></tr><tr><td>处理逻辑</td><td>先判定“找相关知识”还是“按条件列清单”→规范化域、类型与标识→按当前用户身份、已发布状态及消费场景过滤→精确查询逐对象返回，清单以稳定排序分页→可选读取允许的关系。用户侧不继承管理侧可见未发布知识的能力。</td></tr><tr><td>边界情况</td><td>用户试图查看未发布的知识</td></tr><tr><td>不负责</td><td>修改知识、授权、补录或发布；绕过消费场景过滤；承诺列表包含未登记或无权实体；将 MQ-06 语义检索结果当作全域完整清单。</td></tr><tr><td>依赖资产</td><td>Atlas 域、实体类型、标识、英文名、发布状态、关系与权限过滤；<br>管理侧 admin_lookup_knowledge 提供真实查询形态依据，但进入 MCP v2 时必须重新验证用户权限、已发布限制及分页契约。</td></tr></tbody>
+</table>
+
+
+##### 边界情况
+
+<table>
+  <colgroup><col width="281"/><col width="365"/><col width="310"/></colgroup>
+  <thead><tr><th>边界情况</th><th>具体例子</th><th>处理方案</th></tr></thead>
+  <tbody><tr><td>用户试图查看未发布的知识</td><td>{"domain":"growth","pageSize":200,"withRelations":true}</td><td>对用户的身份进行校验。如果是管理员则可见未发布知识；如果非管理员，这部分知识应该做好隔离。</td></tr></tbody>
+</table>
+
+
+##### 验收用例
+
+<table>
+  <colgroup><col width="80"/><col width="198"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>编号</th><th>覆盖场景</th><th>验收输入及来源</th><th>预期结果</th></tr></thead>
+  <tbody><tr><td>A-01</td><td>域内相关知识</td><td>在用增（用户增长）业务域中搜索：用增相关的指标、维度、标签、表知识，以及业务域本身的定义<br>【V1 search 输入·第 7 行】</td><td>返回域内可见知识及匹配依据；Titan 标签缺可靠域映射时明确说明，不用 Atlas tag 属性顶替。</td></tr><tr><td>A-02</td><td>域＋知识类别／关键词</td><td>在live域中搜索维度：直播类型 横竖屏 直播形态<br>【V1 search 输入·第 154 行】</td><td>限定 live 域和维度类型，返回相关候选；不混入其他域的同名维度。</td></tr><tr><td>A-03</td><td>精确查询类型＋英文名＋域</td><td>{"atomType":"MET","domain":"content-consume","enName":"net_online_play_cnt"}<br>【管理侧真实调用入参·第 2 行】</td><td>只查该域、该类型、该英文名；未命中或无权限时逐项表达，不退化成全域模糊搜索。</td></tr><tr><td>A-04</td><td>按实体标识批量查详情</td><td>含 7 个实体标识的 atomIds 批量请求<br>【管理侧真实调用入参·第 20 行，结构摘录】</td><td>输入顺序与逐项状态可追踪；部分对象不存在或不可见时不使整批失败，也不返回未发布内容。</td></tr><tr><td>A-05</td><td>按类型＋域分页</td><td>{"domain":"test-1","atomType":"DIM","includeTestDomains":true,"pageSize":50}<br>【管理侧真实调用入参·第 45 行】</td><td>仅在授权测试域内返回 DIM，分页稳定；参数 includeTestDomains 不能绕过发布和权限门禁。</td></tr><tr><td>A-06</td><td>仅类型清单</td><td>{"atomType":"BE","pageSize":200}<br>【管理侧真实调用入参·第 878 行】</td><td>返回当前用户可见的跨域 BE 清单并标域；不隐式沿用旧域，页大小受限时说明实际值。</td></tr><tr><td>A-07</td><td>仅域清单及关系选项</td><td>{"domain":"growth","pageSize":200,"withRelations":true}<br>【管理侧真实调用入参·第 490 行】</td><td>返回 growth 域内各类可见实体，逐项带类型；关系只给当前场景和权限允许的部分。</td></tr><tr><td>A-08</td><td>分页续查</td><td>继续列出 growth 域的下一页知识。<br>【设计用例】</td><td>沿用已明确的域、排序与游标；无上下文时提示补充，末页明确无下一页。</td></tr><tr><td>A-09</td><td>无权限、未发布与非法条件</td><td>查询未知类型的实体，并展开未发布实体的全部关系。<br>【设计用例】</td><td>类型非法先拒绝；受限或未发布实体不返回名称、内容、关系及可推断其存在的数量。</td></tr></tbody>
+</table>
+
+
+---
+
+## 五、附录
+
+### 5.1 待确认问题
+
+<table>
+  <colgroup><col width="86"/><col width="624"/><col width="258"/></colgroup>
+  <thead><tr><th>编号</th><th>问题</th><th>结论</th></tr></thead>
+  <tbody><tr><td>Q-01</td><td>三个 tool 的拆分与需求归属是否认可，尤其表全景、表级血缘、任务详情的归属？</td><td>表血缘、任务、表全景暂时还是放在表点查中来做</td></tr><tr><td>Q-02</td><td>在表召回的场景下，对于用户按照复合方式筛选表这种情况，如果找不到符合用户所有筛选条件的表，但是去掉某一个条件后能找到一些候选的表，是否需要返回这个候选表列表给用户。还是说这种情况就直接跟用户返回“找不到符合所有条件”的表。</td><td>对于复合问题，Agent自己分发</td></tr><tr><td>Q-03</td><td>数据源是否只考虑Keeper和Atlas知识库？</td><td>是</td></tr><tr><td>Q-04</td><td>此处需要确认数据资产的优先级。有一些信息在Keeper和Atlas知识库中都可以查到，比如说跟指标相关的一些属性，那么优先查哪个？以哪个为准？</td><td>Atlas优先级更高</td></tr><tr><td>Q-05</td><td>admin_lookup_knowledge 管理侧提出的需求合并入元数据查询是否认可？以及合并的策略需要确认：<br>- 策略1:元数据查询内部做权限管理，识别用户是否为平台管理员，如果是就可以看发布和未发布两种状态的知识，如果非平台管理员，就只能看发布态知识。<br>- 策略2:元数据查询不支持管理侧查询，将所有调用的用户都当作消费者，只能查看已发布知识，保留admin_lookup_knowledge工具，只有管理员能使用这个工具看未发布知识。</td><td>暂且放进我们的元数据查询中，后续技术方案设计再具体讨论</td></tr><tr><td>Q-06</td><td>对于需要消岐的场景，比如用业务场景来查表详情，是否认可这样的处理方式：<br>系统接受到用户的问题，不确定用户要找哪个表，所以先调用“表召回”工具查表，此时应该返回一个表清单，用户根据表清单选择他要查的具体的表，然后再调用“表点查”工具查询具体的表详情。</td><td>认可</td></tr><tr><td>Q-07</td><td>对于不支持需求，如果用户有问到，应该分别怎么处理？</td><td>技术方案中具体讨论</td></tr><tr><td>Q-08</td><td>需要讨论“表召回”工具承担的场景是否包含统计分析类需求。<br>方案A：边界按照返回类型来定，凡是要找表的都按照“表召回”来调用。<br>方案B：边界按照场景来定，表召回仅承接消费场景（比如一个数据分析师要根据业务场景来找表）下找表的需求。管理场景也就是对于大数据平台上的表统计分析的场景不归入“表召回”中。可以归入“元数据查询”，或者新增一个“管理tool”。</td><td>暂时结论是将这个场景放进元数据查询，表召回应该仅承接消费场景下的需求</td></tr><tr><td>Q-09</td><td>"通过表标识查询字段结构"这类需求是否放进元数据查询？</td><td></td></tr></tbody>
+</table>
+
+
+### 5.3 排期与风险
+
+<table>
+  <colgroup><col width="100"/><col width="184"/><col width="310"/></colgroup>
+  <thead><tr><th>阶段</th><th>时间</th><th>目标</th></tr></thead>
+  <tbody><tr><td>需求确认</td><td>10.25–10.28</td><td>评审本需求说明，关闭 5.1 待确认问题</td></tr><tr><td>技术方案</td><td>10.28</td><td>完成三个 tool 的技术方案设计</td></tr><tr><td>可行性验证</td><td>11.2</td><td>完成方案可行性验证</td></tr><tr><td>开发</td><td>11.5</td><td>完成工程化开发</td></tr><tr><td>测试与验收</td><td>11.6</td><td>完成测试与线上验证</td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="118"/><col width="242"/><col width="310"/></colgroup>
+  <thead><tr><th>风险</th><th>影响</th><th>应对</th></tr></thead>
+  <tbody><tr><td>排期紧张</td><td>需求分析比预期多2天，可能在11.6无法准时交付</td><td>技术方案需设计的更详细且明确，以此缩短开发所需时间</td></tr></tbody>
+</table>
+
+
+1. 三个tool具体的区别对比
+    1. 三个tool具体需要支持什么功能，不支持什么功能，这个需要在对tool的description中体现
+2. description需要更加的澄清
+3. 整体实现方案。（元数据查询tool的实现方案，还有需要转到前两个tool的需求（crop））

@@ -1,0 +1,374 @@
+# MCP V2 元数据查询 · 用户需求分析
+
+> 数据源：生产环境 4,609 条真实提问（2026-09-14 ~ 09-24，通用元数据Agent + 官方表知识Agent） 拆解方法：复用方案 ① text2NL 的解析规则，把每条提问解析成 QueryPlan，再按「场景 × ref类型 × ref标识 × 输出类型 × 输出什么」聚类、合并重复 用途：给《MCP V2 元数据查询：分层验证与 CK 宽表方案》做需求分析，判断三个 tool 各该承接什么 读法：§一 是结论，§二 之后是支撑明细（口径、问题模式清单、入参形态、边界、用户行为）
+
+
+---
+
+## 一、结论
+
+### 1.1 用户要什么
+
+1. 最高频的动作是「看一张表」：结构 + 产出任务 + 上下游血缘，这同一种问法就有 745 条（占 19.3%），其中 93.8% 来自 argus。用户把它当成一次调用在用，不是三件事。
+2. 任务类是第一需求：在元数据查询范围内，涉及任务的请求占 62.3%，超过数据表本身（52.3%）。
+3. 一次要多种东西是常态：50.5% 的元数据查询请求一次要 ≥2 种问题模式；全局看是 36.8%。
+4. 入参基本都是确定的：82.8% 是库.表名或数字 ID，可直接定位；16.7% 需要消歧或召回。
+5. 个人 token 把 tool 当搜索框用：关键词堆叠 + 只给标识符合计 33.9%，「BDO 社区核心宽表」这类业务昵称要能映射到表。
+6. 16.4% 的提问落在能力边界外，其中数据专辑一项就占 6.3%（且集中在同一个专辑）。
+
+### 1.2 三个 tool 怎么分
+
+判断单位是一条提问，不是单个问题模式——一条提问可能同时要表详情和血缘，只能整体交给一个 tool。
+
+<table>
+  <colgroup><col width="100"/><col width="282"/><col width="100"/><col width="100"/><col width="142"/></colgroup>
+  <thead><tr><th>归属</th><th>判断规则</th><th>请求数</th><th>占分母</th><th>只做一件事的比例</th></tr></thead>
+  <tbody><tr><td>表召回</td><td>全部问题模式都是「召回 · 数据表」</td><td>513</td><td>13.3%</td><td>100%</td></tr><tr><td>表点查</td><td>全部问题模式都是「详情 · 数据表」</td><td>537</td><td>13.9%</td><td>99.8%</td></tr><tr><td>元数据查询</td><td>其余全部（任何复合提问、非表实体）</td><td>2,803</td><td>72.7%</td><td>49.5%</td></tr></tbody>
+</table>
+
+
+分母 3,853。前两个 tool 承接的提问有 99.9% 只做一件事，元数据查询有 50.5% 一次要 ≥2 种——这是三者设计上最本质的差别。
+
+表点查的 537 条里，91 条（16.9%）入参是裸表名，不直接受理，要先走表召回消歧；能直连的只有 446 条（占分母 11.6%）。
+
+分界规则：
+
+<table>
+  <colgroup><col width="198"/><col width="394"/></colgroup>
+  <thead><tr><th>情形</th><th>归谁</th></tr></thead>
+  <tbody><tr><td>只找表，没说要表的什么</td><td>表召回</td></tr><tr><td>只问某张已知表的详情</td><td>表点查</td></tr><tr><td>表详情 + 任何其他诉求</td><td>元数据查询（复合提问整体交付，不拆给两个 tool）</td></tr><tr><td>非表实体的任何问题</td><td>元数据查询（指标、字段、维度、任务）</td></tr><tr><td>表点查的入参是裸表名</td><td>先走表召回消歧，拿到 库.表名 再点查</td></tr></tbody>
+</table>
+
+
+### 1.3 元数据查询要做什么、不做什么
+
+<table>
+  <colgroup><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>做什么（按输出类型）</th><th>不做什么（占全部请求）</th></tr></thead>
+  <tbody><tr><td>任务：产出任务、下游消费任务、任务的输入输出表、任务详情、任务依赖</td><td>keeper 长尾类型（数据专辑·工作空间·Topic·埋点·DQC）9.1%</td></tr><tr><td>数据表：表的血缘、基础属性、表详情、表召回</td><td>运维诊断 3.5%</td></tr><tr><td>指标：口径定义与基础属性、指标召回、绑定的字段</td><td>平台操作指引 2.1%</td></tr><tr><td>字段：口径与取值、字段血缘、绑定关系、字段召回</td><td>任务 SQL 原文 2.0%</td></tr><tr><td>维度：枚举值与含义、维度召回</td><td>UDF 用法 1.1%</td></tr><tr><td>长尾：SQL模板、业务术语、业务规则、业务过程</td><td>读数据本身 0.7%、太泛与点名其他 tool 0.7%</td></tr></tbody>
+</table>
+
+
+边界外的合计 16.4%，逐项处置见 §五。元数据查询内部还有 30.8% 的请求含表结构——那是「表详情 + 其他诉求」的复合提问，不能依赖表点查补齐，否则又退回跨 tool 编排。
+
+### 1.4 决策记录
+
+<table>
+  <colgroup><col width="80"/><col width="240"/><col width="400"/></colgroup>
+  <thead><tr><th>#</th><th>事项</th><th>决策</th></tr></thead>
+  <tbody><tr><td>1</td><td>表详情在两个 tool 里重叠</td><td>接受重叠，不内部转调，共用一套返回结构</td></tr><tr><td>2</td><td>表点查接不接裸表名</td><td>不接，引导先用表召回消歧（91 条，占其请求 16.9%）</td></tr><tr><td>3</td><td>数据专辑是否首期接入</td><td>不接入</td></tr><tr><td>4</td><td>任务 SQL 原文是否覆盖</td><td>本期不覆盖，告知能拿到的是任务、上下游表和字段口径</td></tr><tr><td>5</td><td>边界外是否给 tool 指引</td><td>给，三个 atlas V2 tool 之间互指</td></tr></tbody>
+</table>
+
+
+### 1.5 对 V2 设计的其他含义
+
+1. 第一次就要返回。 26.7% 的相邻提问是原样重发，98.7% 发生在 2 分钟内，与上游 60 秒超时线吻合。
+2. 支持一次查多张表。 用户逐张检查表——一张表问完整画像就换下一张。
+3. 回答「怎么算出来的」。 6.8% 的提问点名要 SQL、代码或加工逻辑，本期只能拒答或给任务与上下游。
+4. 接住搜索框式的输入。 「BDO 社区核心宽表」这类昵称，提到 BDO 的 186 条提问里只有 6 条带了库.表名。
+5. tool 描述里写明只读。 有用户在提问里专门声明「只读、禁止执行 SQL」。
+
+### 1.6 待确认
+
+<table>
+  <colgroup><col width="80"/><col width="400"/><col width="282"/></colgroup>
+  <thead><tr><th>#</th><th>事项</th><th>影响</th></tr></thead>
+  <tbody><tr><td>1</td><td>任务 SQL 或加工逻辑能否从 keeper 之外取到</td><td>6.8% 的提问要加工逻辑</td></tr><tr><td>2</td><td>数据专辑被拒后的统一说法</td><td>需求真实且集中在 6.3% 的流量上</td></tr><tr><td>3</td><td>运维诊断、读数据这两类的目标入口具体是什么</td><td>拒答时给不出准确去处</td></tr></tbody>
+</table>
+
+
+## 二、数据与口径
+
+<table>
+  <colgroup><col width="254"/><col width="400"/></colgroup>
+  <thead><tr><th>口径</th><th>数值</th></tr></thead>
+  <tbody><tr><td>窗口内有效查询</td><td>4,609 条（11 天，日均 419）</td></tr><tr><td>去重后唯一提问</td><td>3,131 条</td></tr><tr><td>解析出查询计划的请求</td><td>3,853 条（83.6%）← 后续占比的分母</td></tr><tr><td>落在能力边界外</td><td>756 条（16.4%），见 §五</td></tr><tr><td>一次要求 ≥2 种问题模式的请求</td><td>1,416 条（36.8%）</td></tr><tr><td>场景分布（一次提问可跨场景）</td><td>召回 23.4%、详情 53.4%、关系 48.8%、统计 0.5%</td></tr></tbody>
+</table>
+
+
+口径约定（前两条决定下面的数字怎么算）：
+
+1. 一个请求只要涉及某个问题模式就计一次，同一请求内重复出现不重复计数（去重口径）。
+2. 复合提问拆成原子问题模式分别计数。例如「X 的表结构、产出任务和上下游血缘」会同时计入「表详情」「表的产出任务」「表的血缘」三个问题模式；复合关系（如 JOB_TABLE,TABLE_LINEAGE）不再单独作为一种问题模式。
+3. 血缘不分方向：上游与下游属于同一个问题模式。表血缘合并为「表的血缘」，字段血缘合并为「字段的血缘」。
+4. 「表结构」类诉求统一记为基础属性 + 字段清单。实测「X 的表结构、产出任务和上下游血缘」这一句式被标成 basic+fields（689 次）与 fields（34 次）两种，属同一意图的标注抖动；按方案「只给表名默认为 basic+fields」的口径归并。而只问基础属性（owner、分层、存储周期等轻量诉求）单独保留 —— 它在返回体量上与「要完整表结构」确有差别。
+5. 字段详情不再细分：注释、口径、单位、枚举取值统一记为「口径与取值」。同一个字段问题此前会被标成基础属性、枚举值、基础+枚举等多种，属标注抖动，且字段详情接口本就一并返回这些信息。
+6. 关系按 ref 视角命名：同一种读写关系，从表出发叫「表的产出任务 / 表的下游消费任务」（输出任务），从任务出发叫「任务的输入表 / 任务的产出表」（输出表），从字段出发叫「字段的下游消费任务」。
+7. 「产出任务 + 上下游血缘」只计产出任务：模型常把这两项放进同一个查询计划，产出任务的方向被血缘带成「上下游」。这类提问只计「表的产出任务」，提问里明确要下游任务时再加计「表的下游消费任务」。
+8. 字段与维度、指标的边界：提问点名了字段英文名（如 pid、source_id）、又没明说「指标」或「维度」时，归字段；只给业务叫法时，按模型判断归指标或维度。
+9. 多类型并存取主类型：一个问题模式若涉及多种输入或输出类型（如「搜索指标和表」），按 数据表 > 任务 > 字段 > 指标 > 维度 的优先级取主类型，不出现组合分类。
+
+「95%」的两种读法：
+
+<table>
+  <colgroup><col width="400"/><col width="156"/><col width="128"/></colgroup>
+  <thead><tr><th>粒度</th><th>覆盖 95% 需要</th><th>章节</th></tr></thead>
+  <tbody><tr><td>问题模式（输出类型 × 场景 × 输出什么，合并 ref 标识后）</td><td>前 16 个</td><td>§三「去重后」</td></tr><tr><td>问题模式 × ref 标识</td><td>前 29 个</td><td>§三</td></tr></tbody>
+</table>
+
+
+---
+
+## 三、问题模式清单（按输出类型 → 场景排序，前 29 个覆盖 95.0%）
+
+什么是「问题模式」：从真实提问归纳出的一类问法，由「场景 × ref类型 × ref标识 × 输出类型 × 输出什么」定义。它描述的是用户怎么问；§一.3 里 tool 侧的「能力」说的是 tool 能提供什么，两者不是一回事。
+
+五列的含义：场景 = 意图类别（召回 / 详情 / 关系 / 统计）；ref类型 = 输入实体的类型；ref标识 = 输入实体的给法（库.表名 / 库.表.字段 / 标识符 / 数字ID / URN / 口语说法）；输出类型 = 要返回的实体类型；输出什么 = 要对它做什么。
+
+排序规则：大分类按 输出类型 分组（按覆盖量降序）；组内按 召回 → 详情 → 关系 → 统计；同场景内按覆盖量降序。一个问题模式若同时涉及多种输出类型（如「搜索指标和表」），归入其主要类型，不在分类名里出现组合。
+
+每个问题模式最多列 10 条真实提问原文，不截断。优先列只问这一件事的提问，不够 10 条再用复合提问补，高频优先。
+
+判断依据按一条提问由哪些问题模式构成来定：只找表、不说要表的什么 → 表召回；已知表、只看这张表的详情 → 表点查（入参是裸表名先消歧，复合提问由元数据查询一并返回）；其余全部 → 元数据查询。同一个问题模式在不同提问里可能归不同 tool，「归属 tool」列的第二行，写的就是它单独出现时的判断依据。详见 §六。
+
+### 数据表　—　覆盖 2,517 条请求（65.3%）
+
+<table>
+  <colgroup><col width="80"/><col width="100"/><col width="100"/><col width="86"/><col width="184"/><col width="100"/><col width="100"/><col width="400"/><col width="394"/></colgroup>
+  <thead><tr><th>场景</th><th>ref类型</th><th>ref标识</th><th>输出类型</th><th>输出什么</th><th>覆盖请求</th><th>占比</th><th>代表提问</th><th>归属 tool<br>判断依据</th></tr></thead>
+  <tbody><tr><td>召回</td><td>未指定</td><td>未指定</td><td>数据表</td><td>按语义描述召回</td><td>582</td><td>15.1%</td><td>1. BDO 社区核心宽表<br>2. BDO 社区核心宽表 移动端稿件分享数 is_story<br>3. 社区核心宽表<br>4. 海外投稿 稿件投稿量 指标口径 表<br>5. BDO 宽表<br>6. /Users/bilibili/Downloads/1792392034-datacenter.ulduar.ulduar-backend-chudaize.log<br>7. lumina 专家团 热度 expert_group lumina_expert<br>8. lumina 专家团 热度 表 字段结构<br>9. 稿件维表 封面 cover url 字段 archive 稿件维度表结构<br>10. lumina 专家 agent 会话 session expert 表结构 官方 前缀</td><td>表召回<br>只找表，不说要表的什么</td></tr><tr><td>详情</td><td>数据表</td><td>库.表名</td><td>数据表</td><td>基础属性 + 字段清单</td><td>1,199</td><td>31.1%</td><td>1. b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d<br>2. b_dwd.dwd_socl_dm_send_detail_i_d<br>3. b_dws.dws_flow_cnsm_content_consume_wide_1d_d 内容消费汇总宽表有哪些字段：点赞、点踩、收藏、播放计数、10s完播、起播次数，表的粒度和分区<br>4. b_dim.dim_prty_memb_basic_user_formal_info_a_d<br>5. b_dm_live.dwb_trad_account_user_consume_i_d<br>6. ods.bilibili_member_user_official<br>7. b_ads.ads_lumina_agent_usage_rpt_d 表结构 字段说明<br>8. b_dim.dim_ctnt_arch_basic_archive_a_d 这张表的分区字段是什么，cover 字段的类型，表粒度和更新频率<br>9. b_dwb.dwd_cct_tfc_ttv_peanut_touch_conversion_wide_l_d<br>10. b_dwd.dwd_flow_ubt_app_visit_detail_l_hr</td><td>表点查<br>已知是哪张表，只要这张表的详情</td></tr><tr><td>详情</td><td>数据表</td><td>标识符</td><td>数据表</td><td>基础属性 + 字段清单</td><td>77</td><td>2.0%</td><td>1. dim_ubt_lumina_experts_hr 表的字段列表和含义<br>2. dwb_socl_dm_send_first_last_status_i_d 这张表的主键和字段<br>3. dwd_motl_newuser_daily_inc_d 表有哪些字段 mid buvid 关联键 分区字段<br>4. 原片表 dwd_arch_raw_video_info_a_d 是否有存储介质/存储分层字段，比如标准存储、低频存储、深度沉降（冷归档）相关字段<br>5. ads_socl_mbhv_boss_bdo_index_1d_d 表结构 指标 字段<br>6. dim_ubt_lumina_agent_hr 表的字段列表和含义<br>7. dws_flow_cnsm_user_consume_detail_wide_1d_d 搜索场景 uv 字段 日汇总宽表 表结构<br>8. 查找 wfc_process_info 表,需要知道它在哪个数据源/数据库,以及表结构字段 table_display_name<br>9. 查询表 dwd_comment_wide 的表结构和字段，确认所在数据库<br>10. %dwb_socl_reply_likes_basic_arch_i_d%</td><td>表点查 · 先消歧<br>表名没带库，先经表召回消歧</td></tr><tr><td>详情</td><td>数据表</td><td>库.表名</td><td>数据表</td><td>基础属性</td><td>72</td><td>1.9%</td><td>1. 查询以下 Hive 表的表级信息（表注释/描述、owner、分区字段、创建时间）：ai.bi_search_user_profile_index、ai.bi_search_data_platform、ai.bi_plat_vv、ai.bi_plat_vt、bili_abtest.dwd_user_exposure_merge_main_buvid_view_a_d<br>2. r_ods.ods_s_growth_rta_click_rt 是什么表，CKLogDeseriersSimpleDelayUDTFV3 这个UDF查询的表是什么<br>3. 查询表 bili_dwd.dwd_tfc_app_buvid_d 的 owner<br>4. b_dim.dim_flow_card_mapping 表的知识覆盖度是多少，覆盖度的统计口径是什么<br>5. b_dm_live.dwb_trad_account_user_consume_i_d 这张表是做什么的<br>6. b_dm_live.dwd_trad_ord_anchor_consume_detail_wide_i_d 这张表是做什么的<br>7. b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d 表的权限等级、安全等级、对外可见性、publicLevel 元数据信息<br>8. b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d 表的表级元数据信息：数据保留时长 duration、更新周期、全量还是增量<br>9. b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d 这张表的行数、存储大小、更新周期是什么<br>10. bi_main_frontend.dwd_ai_studio_svr_knowledge_searched_l_hr 表的负责人、建模类型、粒度、保留天数等表级元信息说明</td><td>表点查<br>已知是哪张表，只要这张表的详情</td></tr><tr><td>详情</td><td>数据表</td><td>标识符</td><td>数据表</td><td>基础属性</td><td>40</td><td>1.0%</td><td>1. 查询热门展点表 dwb_flow_hot_trackid_show_click_play_i_d 的表元数据登记情况<br>2. 查询社区互动宽表 dws_socl_mbhv_basic_mid_buvid_avid_pid_is_fan_action_wide_1d_d 的表元数据登记情况<br>3. /department/ai/ecosys/ott/basic/ott_up_blacklist 这张表的业务含义、口径说明和数据产出逻辑<br>4. TV端超大支付上报链路 order_center 订单上报 埋点还是订单库同步 dwd_trad_ord_vip_tv_order_detail 加工逻辑<br>5. dwb_cct_archanal_arch_interact_analysis_a_hr 当前小时稿件互动数据 计算逻辑<br>6. dwb_prty_memb_rel_follow_first_last_status_index_i_d 主键 mid fid log_date 唯一键<br>7. dwb_prty_memb_rel_follow_first_last_status_index_i_d 主键 primary key 唯一键<br>8. dwb_prty_memb_rel_follow_first_last_status_index_i_d 主键 唯一键 粒度<br>9. dws_socl_mbhv_accm_mid_avid_stat_1d_d 社区互动行为宽表的口径,互动行为的稿件范围是否包含ogv番剧稿件<br>10. ott_up_blacklist OTT UP主黑名单 这张表的业务含义、数据来源和产出方式是什么</td><td>表点查 · 先消歧<br>表名没带库，先经表召回消歧</td></tr><tr><td>详情</td><td>数据表</td><td>口语说法</td><td>数据表</td><td>基础属性 + 字段清单</td><td>18</td><td>0.5%</td><td>1. BDO 社区核心宽表 表结构 字段<br>2. keeper 元数据表 实体类型 entity_type 二级实体类型 sub_entity_type 表结构字段<br>3. BDO 社区核心宽表 字段列表 is_story<br>4. BDO 社区核心宽表 稿件点赞数 稿件收藏数 内容类型拆分 字段<br>5. SLA升级判定明细表 基线变更事件 基线定义 保障等级 口径<br>6. ads 社区 BDO 核心宽表 稿件 点赞数 收藏数 拆分字段<br>7. 查询表: SLA 签署记录表 的表结构和字段<br>8. 社区核心宽表 is_story 移动端 分享数 story<br>9. 社区核心宽表 like_cnt fav_cnt 稿件<br>10. 社区核心宽表 字段清单</td><td>元数据查询<br>表名是口语说法，由本 tool 内部召回</td></tr><tr><td>关系</td><td>数据表</td><td>库.表名</td><td>数据表</td><td>表的血缘（不分方向）</td><td>1,177</td><td>30.5%</td><td>1. 查询表 bili_bdp.data_integrate_instance_data_count_metircs_d_f 的表级下游血缘，列出所有下游表<br>2. 查询表 bili_bdp.dwd_job_history_count_a_d 的表级下游血缘，列出所有下游表<br>3. 查询 Hive 表 bi_ogv.dim_ai_donghua_up_list 的下游表列表（表级血缘，即以该表为上游直接或间接产出的表），以及 b_dim.dim_socl_short2x_playletminiapp_sourcefrom_info 和 b_dim.dim_socl_short2x_playletminiapp_info_d 这两张表的上游表是否包含 bi_ogv.dim_ai_donghua_up_list<br>4. 查询表 bi_bdp.archer_job_history_info 的表级下游血缘，列出所有下游表<br>5. 查询表 bili_bdp.airflow_migrate_job_history 的表级下游血缘，列出所有下游表<br>6. b_dwb.dwb_ctnt_arch_play_detail_i_d 的表级血缘：上游依赖哪些表，下游被哪些表依赖<br>7. 查询表 b_dwd.dwd_pur_order_detail_a_d 的下游血缘表<br>8. 查询表 bi_bdp.archer_job_history_completion_daily_stats 的表级下游血缘，列出所有下游表<br>9. 血缘查询：请查询表血缘，表名 b_dwb.dwb_ctnt_arch_play_detail_i_d，返回它的上游表列表和下游表列表<br>10. bili_main.dwd_trd_chg_order_w_metrics_i_a_hr 的下游表有哪些</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>任务</td><td>数字ID</td><td>数据表</td><td>任务的产出表</td><td>54</td><td>1.4%</td><td>1. 查询以下 20 个任务各自的产出表:9501984、9516880、9519027、9481104、9481103、9314831、9520626、9541913、9550746、100129、9477775、9414206、9477650、9556189、9487233、9406030、9547196、9547197、9396767、9398433<br>2. 查询以下 40 个任务各自的产出表:9501984、9516880、9519027、9481104、9481103、9314831、9520626、9541913、9550746、100129、9477775、9414206、9477650、9556189、9487233、9406030、9547196、9547197、9396767、9398433、9476918、9563714、9559497、9565250、6386555、6360639、9520661、6382166、9568255、9564275、6156951、9525184、9569556、9529055、9538466、9536898、9217915、9461109、9576312、9576080<br>3. 查询以下 20 个任务各自的产出表:7895372、9174630、3706477、9326356、9339316、9367176、9367175、9367508、9367509、9369687、9370747、9390132、9396367、9394893、9407629、9407631、9408123、9409133、9408119、9408615<br>4. 查询以下 20 个任务各自的产出表:9606144、9606365、9588106、9606789、9444849、9444850、9224803、9610085、9567205、9567454、9567206、9614427、9614347、9615770、9618308、9477792、9620817、9594793、9581286、9530073<br>5. 查询以下 20 个任务各自的产出表:9431236、9516617、9497978、9259826、9454344、9517911、9482173、9525379、9525378、9528005、9528007、9528001、9492485、9507614、9529482、9272996、9536099、6357879、9372322、9370243<br>6. 查询以下 20 个任务各自的产出表:9559791、9593478、9594145、9480901、9595647、9590070、9596038、9494221、9596432、9596574、9586203、9598303、9533387、9590147、9599832、9600808、9408360、9408358、9605205、9605568<br>7. 查询以下 5 个任务各自的产出表:9068769、9339317、9337828、7989134、8145307<br>8. 查询以下 20 个任务各自的产出表,只需要任务ID、任务名、负责人和产出表全名:9501984、9516880、9519027、9481104、9481103、9314831、9520626、9541913、9550746、100129、9477775、9414206、9477650、9556189、9487233、9406030、9547196、9547197、9396767、9398433<br>9. 查询以下 20 个任务各自的产出表:8279001、9565784、9468462、6479137、9581043、9581082、5222035、9572087、9584395、9528755、9269726、9584834、9560863、9584835、9510644、9586012、9586013、9535172、9578642、9445963<br>10. 查询以下 20 个任务各自的产出表:9416183、9498672、9498617、9498558、9472941、9501676、9490680、9501150、9501165、9472691、9504208、9504207、9464417、9507978、9496371、9498468、9444564、9412052、1048206、9496482</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>任务</td><td>数字ID</td><td>数据表</td><td>任务的输入表</td><td>19</td><td>0.5%</td><td>1. 查询产出表 b_ads.ads_socl_monitor_pid_from_flow_1d_d 的任务 9630993 的上游表有哪些（input_table_list 输入表列表），以及任务的输入输出表详情<br>2. 查询调度任务 job_id 7478125 投币全业务原子模型的上游输入表（血缘上游），以及这些上游表是否包含 extend_fields 字段<br>3. 任务 9683132 03 日作业:日向量增量维护滚动窗口 → L2 归一化 → 最终用户 emb 的输入表和输出表、表级血缘关系<br>4. llm_asr_hotwords 任务 9333329 详情，同步的源表和目标表是什么<br>5. Beast 任务「商业推荐统一样本流」（jobId 173210660208501）的上游输入表和下游输出表血缘<br>6. archer 任务 9493775 和 9347332 的详情，产出什么表，上游依赖什么表<br>7. 任务 9699918 维度一_UP主内容适配分 的输入表和输出表、表级血缘关系<br>8. 任务 搜索热词屏蔽 9327314 的输入表和输出表是什么，血缘关系<br>9. 任务ID 9698232 atlas_table_usage_daily 的输出表是什么,上下游血缘关系<br>10. 查询 BSK 任务 9697872（T24-DAU消耗LTV报表）的输出表全名、输入表列表，以及该输出表有哪些下游消费任务或报表</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>数据表</td><td>标识符</td><td>数据表</td><td>表的血缘（不分方向）</td><td>19</td><td>0.5%</td><td>1. dwd_job_history_count_a_d 这张表的下游表有哪些，表级血缘<br>2. 查表 dws_prty_memb_rel_board_stats_i_1d_d（关注数相关表，库名可能是 iceberg_bdp 或其他，请按 prty_memb_rel_board_stats 关键词模糊匹配真实表名）：1.实际表名和所在库 2.产出该表的 job（job_id、job_name、project_id）3.上游来源表列表<br>3. 查询表名为 activity_task_related_game 的表元数据信息，包括所属数据源、数据库、表结构、表的上下游血缘关系<br>4. ClickHouse 表 dws_chnl_cost_account_motl_1d_d 的表结构和上游同步任务是什么，数据来自哪张 Hive 表<br>5. activity_task_related_game 表的数据血缘上游来源是哪里？产出该表的同步任务或开发任务是哪个？<br>6. ogv_ep_basic_info_a_hr 的元数据、产出任务和上下游血缘,文件路径 /department/ai/ecosys/ogv/basic_info/ogv_ep_basic_info_a_hr<br>7. tb_dw_sql_history 这个MySQL表入仓到了哪个Hive表，对应的入仓同步任务是什么<br>8. 查询 HDFS 路径 /department/ai/ecosys/ogv/online_data/ogv_basic_info/ogv_basic_info_v4.file 对应的表、产出任务和上下游血缘<br>9. 查询 MySQL 表 activity_task_related_game 的表级血缘上游和产出任务，这张表的数据是从哪里写入的<br>10. 查询表 /department/ai/ecosys/ott/basic/ott_up_blacklist 的元数据信息、所属数据源类型、产出任务和上游血缘</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr></tbody>
+</table>
+
+
+### 任务　—　覆盖 1,747 条请求（45.3%）
+
+<table>
+  <colgroup><col width="80"/><col width="100"/><col width="114"/><col width="86"/><col width="156"/><col width="100"/><col width="100"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>场景</th><th>ref类型</th><th>ref标识</th><th>输出类型</th><th>输出什么</th><th>覆盖请求</th><th>占比</th><th>代表提问</th><th>归属 tool<br>判断依据</th></tr></thead>
+  <tbody><tr><td>详情</td><td>任务</td><td>数字ID</td><td>任务</td><td>基础属性</td><td>89</td><td>2.3%</td><td>1. 查询产出任务 9650901 的任务元数据<br>2. 查询产出任务 9700477 的任务元数据<br>3. 查询 archer 任务 9565787 运行中实例数量 的任务详情与线上 SQL 内容<br>4. 查询产出任务 9677033 的任务元数据<br>5. 查询产出任务 9700988 的任务元数据<br>6. 查询任务 9101531 的元数据信息：任务名称、任务类型、所属项目、负责人<br>7. 查询任务 9630993 的详细信息：任务内容 content、SQL 脚本、依赖的上游任务 job_depends、任务基础配置<br>8. 查询任务 ID 2319922 的任务信息，以及 YARN applicationId application_1787292447119_2319922 对应的任务名称、任务类型、负责人<br>9. 查询调度任务 job_id 7478125（投币全业务原子模型）的任务详情：完整 SQL 代码、任务类型、调度周期、所属工作流、依赖配置<br>10. 查询任务 9699918 维度一_UP主内容适配分 的任务配置、SQL 代码和 spark 参数</td><td>元数据查询<br>非表实体（任务），另两个 tool 只做表</td></tr><tr><td>详情</td><td>任务</td><td>URN</td><td>任务</td><td>基础属性</td><td>20</td><td>0.5%</td><td>1. 查询 archerJob 9397278 的 owner，urn 为 urn:datacenter:archerJob:9397278<br>2. urn:datacenter:archerJob:9387833<br>3. 只读查看产出bili_bi.dws_prty_potential_up_fuchi_i_d的任务9574223（urn:datacenter:archerJob:9574223，up主粒度汇总数据）的任务代码/SQL。重点返回ctnt_uv的上游原始计算SQL及可分发稿件计算是否在本表完成。历史元数据text_command/command/resource为空，需准确支持的代码字段；若工具无法读取代码请明确说明，勿推断。仅查询元数据，禁止执行、更新或取消任务。<br>4. 查询 archerJob 9449261 的 owner，urn 为 urn:datacenter:archerJob:9449261<br>5. 查询 archerJob 9503880 的 owner，urn 为 urn:datacenter:archerJob:9503880<br>6. 查询 archerJob 9589670 的 owner，urn 为 urn:datacenter:archerJob:9589670<br>7. 查询 archerJob 9598980 的 owner，urn 为 urn:datacenter:archerJob:9598980<br>8. 查询 archerJob 9634327 的 owner，urn 为 urn:datacenter:archerJob:9634327<br>9. 查询 archerJob 9662688 的 owner，urn 为 urn:datacenter:archerJob:9662688<br>10. 查询 archerJob 9675445 的 owner，urn 为 urn:datacenter:archerJob:9675445</td><td>元数据查询<br>非表实体（任务），另两个 tool 只做表</td></tr><tr><td>关系</td><td>数据表</td><td>库.表名</td><td>任务</td><td>表的产出任务</td><td>1,385</td><td>35.9%</td><td>1. 查询表 b_dwb.dwb_socl_elec_trad_sales_attribution_detail_i_d 的产出任务信息<br>2. 查询表 b_dwb.dwb_socl_elec_trad_sales_attribution_refund_detail_i_d 的产出任务信息<br>3. 查询表 iceberg_bdp.dwd_history_finish_rate_denominator_v2_d 的产出任务信息<br>4. b_ods.rods_s_growth_rta_click_iceberg_l_hr 这张表的上游血缘任务和输入的 Kafka topic 是什么，growth_rta_click topic 存在吗，它的描述是什么<br>5. 查询表 bi_ogv.ads_charge_channel_order_p24h_ascrb_new_for_ai_i_d 的产出任务信息<br>6. 产出表 b_dwb.dwb_ctnt_arch_play_index_i_d 的任务及其上游表<br>7. 查询表 b_dws.dws_socl_elec_trad_benefit_attribution_1d_d 的产出任务信息<br>8. 查询表 bili_bdp.dwd_airflow_finish_time_compare_dag 的产出任务信息<br>9. 查询表 bili_bdp.dwd_airflow_dag_project_info 的产出任务信息<br>10. 查询表 iceberg_bdp.dwd_flink_running_info_mi 的产出任务信息</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>数据表</td><td>库.表名</td><td>任务</td><td>表的下游消费任务</td><td>147</td><td>3.8%</td><td>1. b_dwd.dwd_flow_ubt_web_main_event_l_hr 表的下游消费任务,哪些任务在解析 333.1369.opus.view.show 和 333.1365.list.card_blocked.show 事件的 extended_fields 私参字段<br>2. 查询 bili_overseas.dwb_user_mid_global_language_a_d 和 bili_overseas.dwb_user_buvid_global_language_a_d 两张表的下游消费任务列表<br>3. 查询表 b_dm_live.dwd_trad_goods_sku_a_d 的下游任务列表,即血缘上以该表作为输入表(读取该表)的所有任务<br>4. 查询表 bili_dwd.dwd_act_reply_d 的下游血缘:哪些任务消费该表(下游任务名/jobId/负责人),这些下游任务各自产出哪些表<br>5. iceberg_bdp.dm_socl_likes_accm_total_interact_index_stats_l_1d_d 这张表的下游任务有哪些，哪些任务读取这张表<br>6. 查询表 b_dm_live.dwd_trad_ord_socl_vas_order_info_i_1d_d 的下游血缘，包括下游任务列表以及每个下游任务对该表字段的使用情况<br>7. b_dwd.dwd_socl_coin_basic_behavior_detail_l_d 表的直接下游消费任务有哪些<br>8. iceberg_bdp.dm_socl_likes_accm_arch_interact_index_stats_l_1d_d 这张表的下游任务有哪些，哪些任务读取这张表<br>9. live_av.lianmai_session 这张表有没有入仓同步任务？请查询该表的下游任务/血缘，看是否有同步到 Hive 的入仓任务<br>10. live_interactbiz.lianmai_apply_order 这张表有没有入仓同步任务？请查询该表的下游任务/血缘，看是否有同步到 Hive 的入仓任务</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>数据表</td><td>标识符</td><td>任务</td><td>表的产出任务</td><td>49</td><td>1.3%</td><td>1. dws_visit_dau_cost_revenue_analysis_i_1d_d 这张表的上游任务有哪些<br>2. dengting_dwb_flow_tm_trackid_show_click_play_i_d_04 产出任务<br>3. 产出表 dwb_socl_suit_mall_user_flow_pay_i_d 的任务是哪个，这个任务的 job_id 是多少<br>4. 查表 ads_cct_up_overview_analysis_a_d 的产出任务,返回任务id和任务名称<br>5. 查询表 dwd_flow_app_ubt_live_rt 的产出任务信息<br>6. 查询表 dws_flow_visit_ott_growth_buvid_dau_analysis_i_1d_d 的产出任务信息（包含定时和手动调度的任务）<br>7. 稿件标签宽表 主投分区 UP主主投2.0分区 dwb_ctnt_arch_basic_arch_wide_a_d 的产出任务<br>8. 查表 dws_prty_memb_rel_board_stats_i_1d_d（关注数相关表，库名可能是 iceberg_bdp 或其他，请按 prty_memb_rel_board_stats 关键词模糊匹配真实表名）：1.实际表名和所在库 2.产出该表的 job（job_id、job_name、project_id）3.上游来源表列表<br>9. 查询表 ogv_basic_info_v4 的完整元数据信息,包括所在数据库、表类型、location 存储路径、产出任务(上游任务)列表<br>10. 查询表 ods_ds8669_skill_hub_catalog_v2_a_hr 的产出任务、所属工作流项目、表状态信息</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>任务</td><td>数字ID</td><td>任务</td><td>任务的上游依赖</td><td>21</td><td>0.5%</td><td>1. 查询任务 9548444（结果表指标，项目：实验宽表数据）的直接上游依赖任务列表（表级/任务级血缘上游）<br>2. 任务 9673811 的上游依赖任务有哪些<br>3. 任务 9673811 的上游依赖任务列表 upstreamJobs<br>4. 任务 9674916 的上游依赖任务列表<br>5. 任务 9674916 的上游依赖任务有哪些<br>6. 任务 9674917 的上游依赖任务有哪些<br>7. 查询产出任务 9547131 的任务元数据<br>8. 查询产出任务 9603939 的任务元数据<br>9. 查询产出任务 9678146 的任务元数据<br>10. 查询任务 9430900（server_click，搜索展点数据产出任务）的上游依赖任务 upstreamJobs 列表</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>字段</td><td>库.表.字段</td><td>任务</td><td>字段的下游消费任务</td><td>18</td><td>0.5%</td><td>1. 检索任务代码（SQL command）中同时引用了表 b_dwb.dwb_trad_ord_elec_order_detail_info_i_d 和字段 buy_month 的所有任务，列出任务ID、任务名、负责人，以及 SQL 中使用 buy_month 的方式（如 select 查询、where 过滤、group by 分组、join 关联等）<br>2. 查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 sub_tid_name 字段的字段级血缘：哪些下游任务/表使用了该字段<br>3. 查询表 b_dwd.dwd_trad_ord_socl_vas_order_detail_info_a_d 的下游任务血缘,列出所有读取该表的下游任务,以及哪些下游任务的SQL中使用了 buy_num 字段<br>4. 分别查询这3张表的 tid_name 字段的字段级血缘下游字段（downstreamFields）以及引用该字段的任务（referencingJobs）：b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d、b_dwb.dwb_ctnt_arch_play_index_visable_time_a_d、b_dws.dws_socl_elec_avid_overview_analysis_1d_d<br>5. 查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 new_tid_name 字段的字段级血缘：哪些下游任务/表使用了该字段<br>6. 查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 tid_name 字段的字段级血缘：哪些下游任务/表使用了该字段<br>7. 查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 tid、sub_tid_name、new_tid_name、new_sub_tid_name 这几个字段各自的字段级血缘下游字段（downstreamFields），以及引用这些字段的任务<br>8. 查询 tmp_bdp.charge_short_play_and_bad_reply_data 表（v1/v2 版本，任务9510692/9510711产出）的下游：哪些任务或表引用了这张表，以及 tid_name、sub_tid_name 字段的下游使用<br>9. 查询字段 b_dwb.dwb_trad_ord_elec_order_detail_info_i_d 的 buy_month 列的完整字段级下游血缘：列出所有下游字段 urn（包括 ai.charge_dwb_trad_ord_elec_order_detail_info_i_d.buy_month、ai.charge_user_pay_feas_v1.his_buy_month、tmp_bdp.dws_opn_val_charge_ltv_apportion_i_1d_d 的 ft_gmv 等），以及每个下游字段对应的产出任务（downstreamTasks/downStreamJob），返回任务ID、任务名称、任务负责人<br>10. 查询表 b_dm_live.dwd_trad_ord_socl_vas_order_info_i_1d_d 中字段 goods_num 的下游血缘，哪些下游任务使用了这个字段</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr></tbody>
+</table>
+
+
+### 指标　—　覆盖 377 条请求（9.8%）
+
+<table>
+  <colgroup><col width="80"/><col width="100"/><col width="100"/><col width="86"/><col width="128"/><col width="86"/><col width="86"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>场景</th><th>ref类型</th><th>ref标识</th><th>输出类型</th><th>输出什么</th><th>覆盖请求</th><th>占比</th><th>代表提问</th><th>归属 tool<br>判断依据</th></tr></thead>
+  <tbody><tr><td>召回</td><td>未指定</td><td>未指定</td><td>指标</td><td>按语义描述召回</td><td>173</td><td>4.5%</td><td>1. 在流量域中搜索指标：稿件卡片 CTR 点击率 曝光量 点击次数 播放次数 原子指标 口径<br>2. 在live域中搜索指标：语聊房嘉宾收益（语聊房连麦/嘉宾收益口径，multi_voice_income 相关）的官方指标口径<br>3. 在内容消费/视频域中搜索：视频收藏次数、投币次数、评论数、点赞数等互动行为指标口径，以及UP主粉丝数指标定义<br>4. BDO 社区核心宽表 弹幕发送数 取数口径 DWD DWB<br>5. 在content-consume域中搜索：兴趣广度 用户播放稿件覆盖分区数 用户维度消费多样性 兴趣分散度 指标<br>6. 在live域中搜索指标：语聊房场次有流水嘉宾数、付费嘉宾数、营收嘉宾人数的指标口径<br>7. 移动端稿件分享数 指标<br>8. 手表 watch 智能手表 穿戴设备 指标<br>9. 知识区 相关推荐 流量 效率 指标 在内容消费域中搜索 MET 指标口径<br>10. 课堂结算成本表 课程成本 bili_chunhua 结算分成 递延 保底金 预付待摊 指标口径</td><td>元数据查询<br>非表实体（指标），另两个 tool 只做表</td></tr><tr><td>详情</td><td>指标</td><td>口语说法</td><td>指标</td><td>基础属性</td><td>166</td><td>4.3%</td><td>1. 取消关注 指标 互动 关注次数 取消关注次数 指标口径<br>2. 互动率 点赞率 收藏率 弹幕 评论 视频稿件互动指标 口径 定义<br>3. 稿件外显评论、外显弹幕发送的官方口径是什么？评论区浏览、根评论浏览、单条评论浏览三个指标的区别和定义？弹幕曝光指标定义？<br>4. BDO 稿件点赞数 收藏数 指标口径<br>5. 人均播放时长 播放总时长 播放人数 指标口径 MET 指标定义<br>6. 有效播放次数 指标口径<br>7. 猫耳直播 人均观看时长 分钟 指标定义 分子分母<br>8. 稿件播放次数 vv 视频播放量 指标口径<br>9. 采购 指定供应商量 指标口径 定义 计算逻辑<br>10. 采购 订单量 指标口径 定义 计算逻辑</td><td>元数据查询<br>非表实体（指标），另两个 tool 只做表</td></tr><tr><td>详情</td><td>指标</td><td>标识符</td><td>指标</td><td>基础属性</td><td>30</td><td>0.8%</td><td>1. 10s完播率 复合指标 播放起播后播放时长超过10秒的次数占播放起播次数的比例 m10s_rate 是否已注册<br>2. 在interact域中搜索：取消关注次数 unfollow_cnt 指标 原子指标 口径<br>3. 10s完播率 完播率 播放完播比率 m10s_rate 指标定义：播放行为完播比率类指标（分子10秒完播次数，分母启播次数或播放次数）<br>4. 播放次数 指标口径 稿件播放次数 met_play_cnt 是否存在<br>5. 播放计数次数 play_cnt 指标定义 计算口径 为什么循环播放重播计入vv<br>6. 猫耳 免费钻 free_coin_num 指标口径 "订单免费钻消费数" miaoer-live_met_free_coin_num 定义 计算逻辑 是否参考字段 为什么仅参考<br>7. 用户性别年龄预测 mid buvid 算法表 user_profile_age_gender 指标口径定义<br>8. 近N天story模式播放数指标 content-consume_met_story_play_cnt_nd 的计算口径，基于什么表什么字段判断 story 模式播放<br>9. 10s完播率 复合指标 m10s_rate 的定义、计算公式、Atlas注册状态，以及稿件宽表 m10s_rate 字段<br>10. qv有点比 qv_click_rate 指标 SP SQL模板 有点击qvid数取数 qvid数取数 OKR口径 计算公式</td><td>元数据查询<br>非表实体（指标），另两个 tool 只做表</td></tr></tbody>
+</table>
+
+
+### 字段　—　覆盖 364 条请求（9.4%）
+
+<table>
+  <colgroup><col width="80"/><col width="100"/><col width="114"/><col width="86"/><col width="184"/><col width="86"/><col width="86"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>场景</th><th>ref类型</th><th>ref标识</th><th>输出类型</th><th>输出什么</th><th>覆盖请求</th><th>占比</th><th>代表提问</th><th>归属 tool<br>判断依据</th></tr></thead>
+  <tbody><tr><td>召回</td><td>未指定</td><td>未指定</td><td>字段</td><td>按语义描述召回</td><td>61</td><td>1.6%</td><td>1. BDO 社区核心宽表 移动端稿件分享数<br>2. BDO 社区核心宽表 稿件点赞数 内容类型拆分 字段<br>3. is_story 移动端 分享<br>4. 在live域中搜索：主播优质模型送审无分数原因（reason/reason_detail，如预审信息不匹配）相关的指标、维度、业务规则或字段知识<br>5. 数仓中首页TAB、底部导航栏TAB相关的维度字段命名先例，表示首页tab位置编号和名称的字段（如 home_tab、tab_no、tab_id、tab_name）有哪些表使用？<br>6. %user_active_level%<br>7. BDO 宽表 稿件点赞数 收藏数 内容类型<br>8. BDO 社区核心宽表 内容类型拆分 稿件点赞数 稿件收藏数 字段 值<br>9. BDO 社区核心宽表 稿件收藏数 内容类型 拆分子字段<br>10. BDO 社区核心宽表 稿件点赞数 内容类型</td><td>元数据查询<br>非表实体（字段），另两个 tool 只做表</td></tr><tr><td>详情</td><td>字段</td><td>标识符</td><td>字段</td><td>口径与取值</td><td>154</td><td>4.0%</td><td>1. 关系链原子表 follow_cnt fans_cnt 字段含义<br>2. b_dwb.dwb_ctnt_arch_interact_accumulated_a_d 这张表的外显评论、外显弹幕字段是累计值还是当日增量？字段名和口径说明<br>3. bdo 用户核心指标 dws_prty_memb_basic_bdo_core_info_a_d 字段 pid 含义<br>4. dwb_prty_memb_rel_follow_first_last_status_index_i_d follow_status_change_type 枚举值含义<br>5. fans_cnt 粉丝数 快照 存量 能否汇总 求和<br>6. pid = -1 表示 未知 无效 值 处理方式 大盘口径 过滤<br>7. 在主站数仓-稿件域中搜索：match_special_type_ip 字段（专属二级内容分类匹配的ip）的指标口径定义和使用方式<br>8. BDO 宽表 pid 取值为 -1 代表什么含义<br>9. is_story 含义 枚举 宽表<br>10. 关系链原子表 fans_cnt 粉丝数 口径定义</td><td>元数据查询<br>非表实体（字段），另两个 tool 只做表</td></tr><tr><td>详情</td><td>字段</td><td>库.表.字段</td><td>字段</td><td>口径与取值</td><td>46</td><td>1.2%</td><td>1. b_ods.ods_tb_shielder_table_apply_audit_d 表的 apply_detail_info 字段内容格式是什么，里面包含哪些信息（表名、申请人、审批状态、耗时等）<br>2. b_ads.ads_ctnt_arch_basic_ai_tags_category_okr_a_hr 表中 match_special_type_ip 字段的定义与业务含义<br>3. b_ads.ads_socl_mbhv_community_flow_env_cube_1d_d 表 no_combo_arch_dm_reply_send_mid_num、login_vv_uv、arch_reply_section_show_duration 三个字段的口径和去重键分别是什么<br>4. b_ads.ads_socl_mbhv_community_flow_env_cube_1d_d 表的 arch_reply_section_show_duration、login_vv_uv、no_combo_arch_dm_reply_send_mid_num 三个字段的描述和口径<br>5. b_ads.ads_socl_mbhv_community_flow_env_cube_1d_d 这张表的 arch_reply_section_show_duration 字段口径是什么<br>6. b_dm_ott.dwb_ctnt_arch_play_tv_summary_l_d 表的字段业务知识：played_vt 的含义与口径<br>7. b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d 三级标签 ai_tags 字段 枚举值 说明<br>8. b_dwb.dwb_ctnt_arch_play_detail_i_d 表的字段业务知识：vt、duration、pid 的含义与口径<br>9. b_dwb.dwb_flow_tm_trackid_show_click_play_i_d 表中 flow_type 流量类型的枚举值定义（1/2/3 分别代表什么），is_inner_ad 是否内广的取值含义，vshow_time 客户端曝光时间的单位；以及 b_dwb.dwb_ctnt_arch_play_index_i_d 表中 from_section 标准化流量来源的枚举取值范围（有哪些值，比如天马/Story/搜索/直播/动态等）<br>10. b_dwb.dwb_prty_memb_rel_follow_first_last_status_index_i_d follow_status_change_type 枚举 5 6 含义</td><td>元数据查询<br>非表实体（字段），另两个 tool 只做表</td></tr><tr><td>详情</td><td>字段</td><td>口语说法</td><td>字段</td><td>口径与取值</td><td>42</td><td>1.1%</td><td>1. pid 产品平台id 维表，pid=15、1124、1128 分别对应的 app_id、platform_id、mobi_app、platform 等字段取值（pc web / pc客户端windows / pc客户端mac 的 pid 映射规则）<br>2. 稿件标签宽表 「是否多p稿件」字段的口径定义和计算逻辑是什么<br>3. BDO 稿件点赞数 内容类型 枚举<br>4. ods_db1415_music_list_a_d 版权音乐表 source_type 字段枚举 1 3 4 5 7 8 分别代表什么来源 版权音乐曲库<br>5. 流量场景 scene 枚举值 天马 搜索 动态 相关推荐<br>6. BDO 宽表 稿件点赞数 收藏数 字段口径<br>7. BDO 社区核心宽表 移动端稿件分享数 is_story 取值<br>8. BDO宽表 pid 取值为 -1 代表什么含义<br>9. B站用户空间主页链接 拼接 space.bilibili.com up_id 主页url字段口径<br>10. Lumina 会话消息表 session message tool_calls_json 字段</td><td>元数据查询<br>非表实体（字段），另两个 tool 只做表</td></tr><tr><td>关系</td><td>指标</td><td>口语说法</td><td>字段</td><td>指标/维度绑定的字段</td><td>22</td><td>0.6%</td><td>1. 社区核心宽表 弹幕发送数 字段来源<br>2. 弹幕发送数 口径 宽表 字段来源<br>3. 播放计数次数 vv 用哪个 SQL 模板查询，首选哪张表，指标口径和源表计算逻辑<br>4. UP主14天吸引能力指标的定义、计算逻辑和源表，粉丝五分层怎么算<br>5. UP主吸引能力指标 14天 定义和源表<br>6. UP主投稿量、投稿人数、涨粉量、稿件播放量、点赞数指标的口径定义和相关表<br>7. vv 播放计数次数 SQL 模板 首选表<br>8. 充电收益指标口径，剔除退款后的当日收益，单片金额换算，源表是哪张<br>9. 在live直播域中搜索以下指标是否存在知识库定义,给出指标中文名、口径定义:①主播月毛利额(签约主播营收毛利) ②主播ACU(平均同时在线人数/日均同时在线)。另外这两个指标对应的字段在哪些数据表里?毛利额的定义是什么口径?ACU是什么口径(月度ACU如何计算)?<br>10. 在互动域中搜索：稿件点赞次数、点踩次数、收藏次数指标的口径定义、聚合方式、绑定字段</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>字段</td><td>库.表.字段</td><td>字段</td><td>字段的血缘（不分方向）</td><td>21</td><td>0.5%</td><td>1. 查询字段级血缘:表 b_dwb.dwb_trad_ord_elec_order_detail_info_i_d 的 buy_month 字段被哪些下游任务消费引用<br>2. 查询字段血缘：表 b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d 中字段 vt、vv、arch_online_likes_cnt_acc、arch_online_play_cnt_acc 的下游引用任务列表（即哪些任务的 SQL 使用了这些字段），返回任务ID和任务名称<br>3. 查询表 b_dwd.dwd_socl_reply_send_626_a_d 的 ip 字段有哪些下游任务在读取使用（字段级/列级血缘，下游消费方 job 列表）<br>4. 查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 sub_tid_name 字段的字段级血缘：哪些下游任务/表使用了该字段<br>5. 只读查询Hive表 bili_bi.dws_prty_up_potential_up_final_a_d 字段 is_remove 的官方生产定义与SQL、potential_operation_days起算日期、20260116去尾规则中千粉下社群对应渠道标签和新增AI渠道继承逻辑。通用元数据确认生产任务9504036但代码返回空，请检索官方表知识中有无准确表达式；未知明确未知，禁止推测。<br>6. b_dws.dws_flow_cnsm_arch_pid_fan_1d_d 表的 bi_new_tid_name、bi_new_sub_tid_name 字段的口径定义和数据来源，来自哪张稿件维表<br>7. 分别查询这3张表的 tid_name 字段的字段级血缘下游字段（downstreamFields）以及引用该字段的任务（referencingJobs）：b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d、b_dwb.dwb_ctnt_arch_play_index_visable_time_a_d、b_dws.dws_socl_elec_avid_overview_analysis_1d_d<br>8. 只读核验Hive表 bili_bi.dws_prty_up_potential_up_final_a_d：返回完整物理字段名、类型、分区、表粒度、主键、更新频率、分区保留时长、最新可用分区和生产任务ID。特别查 is_remove 与 potential_operation_days 的准确生产SQL/字段血缘与定义，渠道包含 is_potential_model,is_star,is_self_recommend,is_potential_group,other_potential_verison。若可取得当前生产SQL请原样给出相关CASE及上游表字段；未知请明确未知，禁止猜测。评估现行20260116渠道资格复核规则及人工潜力标注>=60天门槛。<br>9. 查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 new_tid_name 字段的字段级血缘：哪些下游任务/表使用了该字段<br>10. 查询 b_dim.dim_ctnt_arch_charge_info_a_d 表中 tid_name 字段的字段级血缘：哪些下游任务/表使用了该字段</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr><tr><td>关系</td><td>指标</td><td>标识符</td><td>字段</td><td>指标/维度绑定的字段</td><td>17</td><td>0.4%</td><td>1. 弹幕发送数 宽表 原子指标 met_inct_dm_send_cnt 来源表<br>2. 在 live 域中搜索：近30日爆出金瓜子 live_met_rev_coin_30d 指标定义 绑定字段<br>3. 在live域中搜索：进房次数 room_enter_cnt 指标绑定字段和来源表<br>4. 流量域原子指标「点击次数」met_click_cnt 的口径定义、所属业务过程、绑定源表和关联SP<br>5. 10秒完播率 m10s_rate 指标是否注册为复合指标，英文名是什么，包含哪些绑定字段<br>6. 在 live 域中搜索：近10d进房次数 room_pv_10 用户对主播 进房PV 进房次数 指标定义 绑定字段<br>7. 在content-consume内容消费域中搜索：播放次数 播放量 play_cnt 指标的绑定字段、聚合方式、关联SQL模板，以及天级全站播放量汇总表<br>8. 在live域中搜索：进房次数 room_enter_cnt 指标的绑定字段、计算逻辑、来源表、SQL模板使用详情<br>9. 在主站内容消费域中搜索：播放计数次数 met_cnsm_play_cnt 指标的绑定表和绑定字段，dws_flow_cnsm_content_consume_wide_1d_d 内容消费宽表通用查询 SQL 模板，全站按天汇总播放次数<br>10. 在直播域中搜索：进房次数 观看次数 观看时长 指标 live_met_room_enter live_met_watch 绑定字段</td><td>元数据查询<br>关系查询，另两个 tool 不做</td></tr></tbody>
+</table>
+
+
+### 维度　—　覆盖 73 条请求（1.9%）
+
+<table>
+  <colgroup><col width="80"/><col width="100"/><col width="100"/><col width="86"/><col width="128"/><col width="86"/><col width="86"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>场景</th><th>ref类型</th><th>ref标识</th><th>输出类型</th><th>输出什么</th><th>覆盖请求</th><th>占比</th><th>代表提问</th><th>归属 tool<br>判断依据</th></tr></thead>
+  <tbody><tr><td>召回</td><td>未指定</td><td>未指定</td><td>维度</td><td>按语义描述召回</td><td>26</td><td>0.7%</td><td>1. 在live域中搜索以下维度定义：直播分区（娱乐/虚拟/电台/游戏/知识生活）、主播开播阶段（新主播30天内/31-90天/91天以上分层）、主播ID（ruid）<br>2. 在live域中搜索维度：主播（主播ID、ruid）、渠道（产品平台、端、app/web）<br>3. 内容消费 播放 来源渠道 维度 渠道分类 分发渠道<br>4. 在 live 域中搜索直播维度：主播、公会、主播角色（厅主/嘉宾/团长/团员）、聊天室分区、统计日期<br>5. 在live域中搜索维度：live_key 直播场次ID<br>6. 在live域中搜索维度：room_type 直播间队列类型<br>7. 在live域中搜索维度：sub_session_key 直播切分区唯一ID 子分区开播key<br>8. 在live域中搜索维度：直播分区、开播模式（语聊房/聊天室）的维度口径与枚举值<br>9. 在live域中搜索维度：直播类型 横竖屏 直播形态<br>10. 在toy业务域中搜索：toy 维度属性，toy_id、绑定动态id等维度</td><td>元数据查询<br>非表实体（维度），另两个 tool 只做表</td></tr></tbody>
+</table>
+
+
+### 未指定类型　—　覆盖 34 条请求（0.9%）
+
+<table>
+  <colgroup><col width="80"/><col width="100"/><col width="100"/><col width="86"/><col width="128"/><col width="86"/><col width="86"/><col width="400"/><col width="296"/></colgroup>
+  <thead><tr><th>场景</th><th>ref类型</th><th>ref标识</th><th>输出类型</th><th>输出什么</th><th>覆盖请求</th><th>占比</th><th>代表提问</th><th>归属 tool<br>判断依据</th></tr></thead>
+  <tbody><tr><td>召回</td><td>未指定</td><td>未指定</td><td>未指定</td><td>按语义描述召回</td><td>33</td><td>0.9%</td><td>1. hotword_manager<br>2. 游戏直播流水<br>3. ODS 表按同步快照时刻分区、业务日期在表内字段的场景，历史补报/迟到数据如何被下游捞到，平台推荐做法或最佳实践<br>4. SLA 升级判定明细 数据链路变更事件<br>5. SLA等级升级<br>6. TV助手互动来源标识 operate_source tv_assistant 社区互动行为扩展字段 投币来源<br>7. app_upower_order_create<br>8. b_map2json<br>9. lumina agent 会话 session 专家 expert<br>10. lumina agent 会话 session 专家 expert 官方</td><td>元数据查询<br>没给类型词，找的不一定是表</td></tr></tbody>
+</table>
+
+
+---
+
+### 去重后：把 ref 标识合并（前 16 个覆盖 95.1%）
+
+§三 把「同一种问题模式的不同 ref 标识」拆成了多行，因为解析路径不同。合并后看总量，只要 16 个问题模式就覆盖 95%。排序同 §三。
+
+<table>
+  <colgroup><col width="100"/><col width="80"/><col width="184"/><col width="100"/><col width="100"/><col width="100"/></colgroup>
+  <thead><tr><th>输出类型</th><th>场景</th><th>输出什么</th><th>覆盖请求</th><th>占比</th><th>累计</th></tr></thead>
+  <tbody><tr><td>数据表</td><td>召回</td><td>按语义描述召回</td><td>586</td><td>15.2%</td><td>15.2%</td></tr><tr><td>数据表</td><td>详情</td><td>基础属性 + 字段清单</td><td>1,297</td><td>33.7%</td><td>48.7%</td></tr><tr><td>数据表</td><td>详情</td><td>基础属性</td><td>118</td><td>3.1%</td><td>51.7%</td></tr><tr><td>数据表</td><td>关系</td><td>表的血缘（不分方向）</td><td>1,206</td><td>31.3%</td><td>62.6%</td></tr><tr><td>数据表</td><td>关系</td><td>任务的产出表</td><td>56</td><td>1.5%</td><td>64.1%</td></tr><tr><td>任务</td><td>详情</td><td>基础属性</td><td>116</td><td>3.0%</td><td>66.9%</td></tr><tr><td>任务</td><td>关系</td><td>表的产出任务</td><td>1,442</td><td>37.4%</td><td>75.7%</td></tr><tr><td>任务</td><td>关系</td><td>表的下游消费任务</td><td>152</td><td>3.9%</td><td>77.2%</td></tr><tr><td>指标</td><td>召回</td><td>按语义描述召回</td><td>173</td><td>4.5%</td><td>81.3%</td></tr><tr><td>指标</td><td>详情</td><td>基础属性</td><td>193</td><td>5.0%</td><td>86.0%</td></tr><tr><td>字段</td><td>召回</td><td>按语义描述召回</td><td>61</td><td>1.6%</td><td>87.4%</td></tr><tr><td>字段</td><td>详情</td><td>口径与取值</td><td>245</td><td>6.4%</td><td>92.8%</td></tr><tr><td>字段</td><td>关系</td><td>指标/维度绑定的字段</td><td>39</td><td>1.0%</td><td>93.1%</td></tr><tr><td>字段</td><td>关系</td><td>字段的血缘（不分方向）</td><td>28</td><td>0.7%</td><td>93.6%</td></tr><tr><td>维度</td><td>召回</td><td>按语义描述召回</td><td>26</td><td>0.7%</td><td>94.2%</td></tr><tr><td>未指定类型</td><td>召回</td><td>按语义描述召回</td><td>33</td><td>0.9%</td><td>95.1%</td></tr></tbody>
+</table>
+
+
+> 累计列是把上表自上而下逐个纳入后，命中并集的去重请求数占分母的比例。「覆盖请求」是该问题模式单独命中的去重请求数，故各行之和大于分母。某行若完全被前面的问题模式覆盖，累计值不变。
+
+
+### 口径提醒
+
+本次拆解复用了方案 ① text2NL 的解析规则，标注结果等于方案当前 prompt 的理解口径，不是人工标注的真值。随机抽检 14 条、针对性抽检 22 条 UNSUPPORTED_KIND 样本后，发现三类偏差：
+
+<table>
+  <colgroup><col width="170"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>偏差</th><th>表现</th><th>对结论的影响</th></tr></thead>
+  <tbody><tr><td>ref 字符串被截断</td><td>bi_ogv.ads_charge_channel_order_p24h_ascrb_new_for_ai_i_d 被写成 ..._order_p2，与 prompt「ref 必须照抄原文」不符</td><td>无：本文档只用 ref_type，不用 ref 的具体值</td></tr><tr><td>句式误判</td><td>「dwb_xxx 表 vv vt 指标口径」被解析成字段详情而非指标口径</td><td>轻微：个别问题模式的量可能被低估</td></tr><tr><td>边界误判</td><td>「$playerSpmid 播放器页面标识，与 spmid 的区别和取值」被拒答为 UNSUPPORTED_KIND，按规则应是字段取值含义</td><td>抽检 22 条中约 1 条，边界占比可能被轻微高估（不影响 16.4% 的量级）</td></tr></tbody>
+</table>
+
+
+提问文本是 agent 改写后的，句式更多反映 agent 的 prompt 和 skill，不完全是人的原话；「目的」「话题」按关键词粗分，有误判，只看量级。若要作为需求基线，建议对 §三「去重后」的前 8 个问题模式做一轮人工抽检。
+
+---
+
+## 四、ref 是什么：入参形态分布
+
+4,609 条提问里解析出 6,475 个实体引用（一次提问可能带多个实体）。
+
+形态由字符串确定性判定，不依赖模型判断：点号分隔的标识符（ai.xxx、b_dwd.dwd_xxx_i_d）一律算「库.表名」，但字段的全名是「库.表.字段」三段，「表.字段」两段缺库名算「标识符」；纯数字算「数字 ID」；urn: 开头算 URN；其余纯英文标识符算「标识符」；只有含中文的口语说法才交给语义判断。
+
+<table>
+  <colgroup><col width="366"/><col width="100"/><col width="100"/><col width="310"/></colgroup>
+  <thead><tr><th>ref 标识</th><th>引用次数</th><th>占比</th><th>意味着什么</th></tr></thead>
+  <tbody><tr><td>库.表名 / 库.表.字段（full_name）</td><td>4,378</td><td>67.6%</td><td>可直接定位，无歧义</td></tr><tr><td>数字 ID（id）</td><td>983</td><td>15.2%</td><td>任务 ID 为主，可直接点查</td></tr><tr><td>标识符（name）</td><td>539</td><td>8.3%</td><td>裸表名、表.字段、字段名，缺库名，需消歧</td></tr><tr><td>口语说法（semantic）</td><td>542</td><td>8.4%</td><td>中文叫法/业务描述，需召回</td></tr><tr><td>URN</td><td>33</td><td>0.5%</td><td>直接定位</td></tr></tbody>
+</table>
+
+
+免歧义的全名 + 数字 ID 合计 82.8%；裸标识符与口语说法合计 16.7% 需要先消歧或召回，另有 0.5% 是 URN 可直接定位。
+
+### 一次问多件事：高频组合 TOP 15
+
+<table>
+  <colgroup><col width="80"/><col width="400"/><col width="80"/><col width="100"/><col width="400"/></colgroup>
+  <thead><tr><th>#</th><th>组合（原子问题模式）</th><th>请求数</th><th>占比</th><th>代表提问</th></tr></thead>
+  <tbody><tr><td>1</td><td>关系·任务·表的产出任务  ⊕  关系·数据表·表的血缘（不分方向）  ⊕  详情·数据表·基础属性 + 字段清单</td><td>745</td><td>19.3%</td><td>ai.scenario_unify_trace_log 的表结构、产出任务和上下游血缘</td></tr><tr><td>2</td><td>召回·数据表·按语义描述召回</td><td>513</td><td>13.3%</td><td>查找 AtlasTableUsageJob 读取的 BP 映射表（stat_date 分区），以及产出该表的上游任务；atlas dashboard 知识覆盖度</td></tr><tr><td>3</td><td>详情·数据表·基础属性 + 字段清单</td><td>479</td><td>12.4%</td><td>查询表 ods_ds8669.expert_skills_v2_a_hr 和 ods_ds8669.skill_hub_catalog_v2_a_hr 的表结构</td></tr><tr><td>4</td><td>关系·任务·表的产出任务</td><td>331</td><td>8.6%</td><td>查询产出表 b_dwb.dwb_flow_cnsm_content_comsume_middle_i_d 的任务ID和任务名称</td></tr><tr><td>5</td><td>关系·任务·表的产出任务  ⊕  关系·数据表·表的血缘（不分方向）</td><td>240</td><td>6.2%</td><td>查询表 b_dws.dws_flow_cnsm_content_consume_wide_1d_d 的产出任务ETL SQL和上游表，重点看vv和vt字段来源</td></tr><tr><td>6</td><td>详情·字段·口径与取值</td><td>199</td><td>5.2%</td><td>dwb_flow_cnsm_content_comsume_middle_i_d 表 vv vt 指标口径</td></tr><tr><td>7</td><td>召回·指标·按语义描述召回</td><td>148</td><td>3.8%</td><td>在live域中搜索指标：开播天数</td></tr><tr><td>8</td><td>详情·指标·基础属性</td><td>127</td><td>3.3%</td><td>用户活跃度标准口径定义,高活中活低活用户的划分标准和计算逻辑</td></tr><tr><td>9</td><td>详情·任务·基础属性</td><td>105</td><td>2.7%</td><td>查询 archer 任务 atlas_table_usage_daily（jobId=9698232，项目 知识覆盖度数据看板 projectId=913112</td></tr><tr><td>10</td><td>关系·数据表·表的血缘（不分方向）</td><td>93</td><td>2.4%</td><td>b_dwb.dwb_prty_creator_external_high_potential_wide_a_w 这张站外作者跨平台高潜宽表的上游依赖表有哪些？抖</td></tr><tr><td>11</td><td>关系·任务·表的下游消费任务  ⊕  关系·数据表·表的血缘（不分方向）</td><td>70</td><td>1.8%</td><td>查询表 ai.charge_dwb_trad_ord_elec_order_detail_info_i_d 的下游血缘:哪些任务读取这张表作为输入,这些任务产出</td></tr><tr><td>12</td><td>详情·数据表·基础属性</td><td>62</td><td>1.6%</td><td>查询表 bi_sycpb.ads_brand_showclickcallup_pvuv_a_hr 的 owner</td></tr><tr><td>13</td><td>关系·任务·表的下游消费任务</td><td>53</td><td>1.4%</td><td>查询以 b_dwb.dwb_flow_cnsm_content_comsume_middle_i_d 作为输入表（读取该表）的下游任务列表，输出任务ID、任务名</td></tr><tr><td>14</td><td>召回·字段·按语义描述召回</td><td>50</td><td>1.3%</td><td>在社区互动域中搜索：投币行为操作来源标识 operate_source tv_assistant</td></tr><tr><td>15</td><td>关系·任务·表的产出任务  ⊕  详情·数据表·基础属性 + 字段清单</td><td>43</td><td>1.1%</td><td>查询 Hive 表 b_dwb.dwb_ctnt_arch_play_socl_mbhv_match_detail_i_hr 的表结构、字段列表、分层归属（DW</td></tr></tbody>
+</table>
+
+
+---
+
+## 五、边界与拒答（756 条，占全部请求 16.4%）
+
+这些提问没有产出可执行计划，按 ① 的拒答规则归类如下（一条提问可能命中多个原因，故次数之和大于条数）：
+
+<table>
+  <colgroup><col width="400"/><col width="80"/><col width="100"/><col width="226"/><col width="400"/></colgroup>
+  <thead><tr><th>拒答规则</th><th>次数</th><th>占全部请求</th><th>处置</th><th>典型提问</th></tr></thead>
+  <tbody><tr><td>① keeper 长尾类型：工作空间、数据专辑、Kafka Topic、埋点事件、数据质量规则</td><td>420</td><td>9.1%</td><td>本期不做，说明不在范围内</td><td>查询工作空间 bdpgj（数据平台部-工具组）在 Kafka 集群 Kafka_jscs02-databus-k</td></tr><tr><td>② 运维诊断：基线/实例失败原因、运行耗时、队列</td><td>160</td><td>3.5%</td><td>指到平台侧对应入口</td><td>查询基线链路失败告警详情，alarmUuid=7661db9ee762410d9100d1d16afcba1e，</td></tr><tr><td>③ 平台操作指引：权限申请、建表规范、任务状态配置</td><td>95</td><td>2.1%</td><td>指到平台文档</td><td>Berserker 数据平台中创建禁用态（disabled/冻结）任务的规范：任务创建时如何保持禁用状态？任务分</td></tr><tr><td>④ 数据源没有的能力：任务 SQL 代码原文</td><td>90</td><td>2.0%</td><td>本期不覆盖，告知能拿到什么</td><td>查询 archer 任务 atlas_table_usage_daily（jobId=9698232，项目 知识</td></tr><tr><td>⑤ 平台 UDF 函数用法</td><td>49</td><td>1.1%</td><td>不在范围</td><td>查询平台 UDF 函数 b_explode_llm_billing_skus_v2 版本 1.0.0 的注册信息</td></tr><tr><td>⑥ 要读数据本身：分区值、行数、存储大小</td><td>34</td><td>0.7%</td><td>指到查询类入口</td><td>查询表 b_dwb.dwb_prty_creator_external_high_potential_wide_</td></tr><tr><td>⑦ 太空泛，没有可查询内容</td><td>23</td><td>0.5%</td><td>引导补充信息，不转 tool</td><td>查询以下 5 个任务的产出表,以紧凑文本格式返回,每行格式为:jobId\</td></tr><tr><td>⑧ 点名了其他 tool</td><td>10</td><td>0.2%</td><td>直接转该 tool</td><td>Berserker 平台是否有查询部门信息的接口？部门组织架构查询 API</td></tr></tbody>
+</table>
+
+
+### ① 类内部：谁撑起了这 9.1%
+
+<table>
+  <colgroup><col width="184"/><col width="80"/><col width="100"/><col width="100"/><col width="400"/></colgroup>
+  <thead><tr><th>子类</th><th>次数</th><th>占全部请求</th><th>占 ① 类</th><th>典型提问</th></tr></thead>
+  <tbody><tr><td>数据专辑</td><td>289</td><td>6.3%</td><td>68.8%</td><td>数据专辑 urn:datacenter:dataAlbum:1350018 包含哪些表</td></tr><tr><td>其他长尾类型</td><td>39</td><td>0.8%</td><td>9.3%</td><td>KFC 数据源 Kfc_ai 下有没有 history_creative_click 相关的表或 key，哪些任务写 K</td></tr><tr><td>工作空间/空间</td><td>27</td><td>0.6%</td><td>6.4%</td><td>查询工作空间 bdpgj（数据平台部-工具组）在 Kafka 集群 Kafka_jscs02-databus-kafka</td></tr><tr><td>埋点/事件</td><td>25</td><td>0.5%</td><td>6.0%</td><td>北极星 app 端埋点按 business 分表的规则是什么？event_id 首段是业务名（如 toy、main、li</td></tr><tr><td>Kafka/Topic</td><td>19</td><td>0.4%</td><td>4.5%</td><td>r_rtd.rtd_rta_sem_play 这个 Kafka topic 的上游血缘是谁生产的，下游有哪些任务消费</td></tr><tr><td>数据服务/API</td><td>11</td><td>0.2%</td><td>2.6%</td><td>OS-API 1544 iceberg_bdp.ads_org_dg_unit_main_dg_unit_a_1d 接口</td></tr><tr><td>回收站/软删除表</td><td>9</td><td>0.2%</td><td>2.1%</td><td>实验平台工作空间回收站中有多少张表？这些表的存储大小总共多少GB？</td></tr><tr><td>数据质量规则</td><td>1</td><td>0.0%</td><td>0.2%</td><td>大模型计费 billing 相关的 DQC 数据质量规则配置有哪些（dws_llm_billing_sku_a_h、dw</td></tr></tbody>
+</table>
+
+
+数据专辑一类独占 ① 类的 68.8%（289 次，占全部请求 6.3%），且提问高度集中在同一个专辑（dataAlbum:1350018，「数据专辑 1350018 包含哪些表」这一种问法就重复出现 25 次）。
+
+这与方案 §1.3 的估计有出入：方案写「边界五类合计约 4.3%，剔除上游误发后 3.0%」，而按本次口径实测，落在能力边界外的提问占 16.4%，差 3~5 倍，差额主要来自数据专辑。口径差异的原因：方案的 4.3% 来自画像的能力标签口径（只算「纯粹问专辑」的提问），本次是「没有产出任何可执行计划」口径（把专辑与其他诉求混问的也计入）。
+
+建议：数据专辑（尤其是「专辑下的表清单」）是真实且集中的需求，是否首期收敛需要单独决策 —— 若不做，这 6.3% 的流量会持续落到拒答上。
+
+---
+
+## 六、用户需求洞察
+
+前面几章按问题模式拆解，本章换成提问者的角度：谁在问、怎么问、想解决什么问题、提问过程中有什么行为。本章的分母是全部 4,609 条请求（含落在边界外的），和前几章不同。
+
+一句话结论：大多数提问是 agent 替人在用一张表之前做尽职调查——确认结构、谁产出、上下游和口径；拿不到结果就原样重发，一次检查一张表、逐张换着问。
+
+### 6.1 谁在问：主要是 agent，而且很集中
+
+<table>
+  <colgroup><col width="212"/><col width="100"/><col width="100"/><col width="80"/></colgroup>
+  <thead><tr><th>调用方</th><th>请求数</th><th>占比</th><th>用户数</th></tr></thead>
+  <tbody><tr><td>lumina</td><td>3,128</td><td>67.9%</td><td>120</td></tr><tr><td>argus</td><td>771</td><td>16.7%</td><td>64</td></tr><tr><td>个人 token</td><td>700</td><td>15.2%</td><td>16</td></tr><tr><td>data-workflow</td><td>10</td><td>0.2%</td><td>2</td></tr></tbody>
+</table>
+
+
+- 这个 tool 的直接用户是 agent，人的问题都经过 agent 改写后才进来。
+- 全部 183 个用户里，前 5 个占了 42.2% 的请求，前 20 个占 66.3%。个人 token 只有 16 人，其中一个人就占了 359/700 条。
+- 需求画像容易被少数重度用户和某个 skill 带偏，排优先级时要看用户数，不能只看请求数。
+
+### 6.2 怎么问：三种完全不同的输入
+
+<table>
+  <colgroup><col width="142"/><col width="400"/><col width="100"/><col width="400"/></colgroup>
+  <thead><tr><th>调用方</th><th>主要句式</th><th>长度中位数</th><th>特点</th></tr></thead>
+  <tbody><tr><td>argus</td><td>93.8% 是固定模板「X 的表结构、产出任务和上下游血缘」</td><td>48 字</td><td>本质是结构化调用，只是套了一层自然语言</td></tr><tr><td>lumina</td><td>66.1% 是完整问句或指令</td><td>57 字</td><td>常带业务背景；7.1% 的提问点名了要返回的属性（如 job_id、负责人、字段类型）</td></tr><tr><td>个人 token</td><td>52.6% 关键词堆叠，18.3% 只给一个标识符</td><td>34 字</td><td>当搜索框用</td></tr></tbody>
+</table>
+
+
+按句式统计全部请求：
+
+<table>
+  <colgroup><col width="128"/><col width="100"/><col width="400"/></colgroup>
+  <thead><tr><th>句式</th><th>占比</th><th>例子</th></tr></thead>
+  <tbody><tr><td>完整问句或指令</td><td>50.4%</td><td>在用增（用户增长）业务域中搜索：用增相关的指标、维度、标签、表知识，以及业务域本身的定义<br>查询表 b_ods.ds7019_pricings_a_d 的产出任务（写入该表的任务）的任务ID、任务名称和调度周期</td></tr><tr><td>关键词堆叠</td><td>29.6%</td><td>dwb_flow_cnsm_content_comsume_middle_i_d 表 vv vt 指标口径<br>dwb_ctnt_arch_play_detail_i_d 播放明细表 vv vt 口径 计算</td></tr><tr><td>固定模板</td><td>15.7%</td><td>ai.scenario_unify_trace_log 的表结构、产出任务和上下游血缘<br>ai.search_plasma_online_long_seq_merge 的表结构、产出任务和上下游血缘</td></tr><tr><td>只给一个标识符</td><td>4.3%</td><td>hotword_manager<br>b_dm_live.dwd_trad_ord_anchor_consume_detail_wide_i_d</td></tr></tbody>
+</table>
+
+
+其他值得注意的写法：
+
+- 带一大段业务背景（超过 120 字）的占 5.5%。
+- 明确提输出格式要求（「只返回…」「每行格式为…」）的只有 0.5%，大多数提问不规定格式。
+- 个人 token 有 4.3% 的提问写明「只读、禁止执行 SQL」，担心 agent 动数据。
+
+同一个 tool 要同时接住像 API 调用的、像指令的、像搜索框的三种输入。
+
+### 6.3 想解决什么问题
+
+剔除 argus 的固定模板后还有 3,886 条。下表按关键词粗分，一条提问可以算进多类，35.7% 的提问没有命中任何一类。数字只看量级。
+
+<table>
+  <colgroup><col width="282"/><col width="100"/><col width="400"/></colgroup>
+  <thead><tr><th>目的</th><th>占比</th><th>例子</th></tr></thead>
+  <tbody><tr><td>追来源：数据从哪来、由哪个任务产出</td><td>23.3%</td><td>查询表 b_dws.dws_flow_cnsm_content_consume_wide_1d_d 的产出任务ETL SQL和上游表，重点看vv和vt字段来源<br>查询表 b_ods.ds7019_pricings_a_d 的产出任务（写入该表的任务）的任务ID、任务名称和调度周期</td></tr><tr><td>懂口径：指标或字段怎么算、是什么意思</td><td>15.2%</td><td>dwb_flow_cnsm_content_comsume_middle_i_d 表 vv vt 指标口径<br>在用增（用户增长）业务域中搜索：用增相关的指标、维度、标签、表知识，以及业务域本身的定义</td></tr><tr><td>用表前确认结构</td><td>10.9%</td><td>dw_bdp.dwb_data_hive_bsk_column_hot_stat_i_d 的表结构，包含哪些字段<br>bili_bdp.keeper_table_using_stat_exclude_etl 的表结构，包含哪些字段</td></tr><tr><td>找数：不知道该用哪张表</td><td>7.7%</td><td>工作空间资源配额表 ishtar quota 变更记录表在哪<br>出海业务线有哪些数据表？小站业务的表有哪些？资源位、创作者相关的表有哪些？</td></tr><tr><td>评影响：改动会波及谁</td><td>6.6%</td><td>查询表 b_dm_live.dwd_trad_goods_sku_a_d 的下游任务列表,即血缘上以该表作为输入表(读取该表)的所有任务<br>查询 BSK 任务 9697872（T24-DAU消耗LTV报表）的输出表全名、输入表列表，以及该输出表有哪些下游消费任务或报表</td></tr><tr><td>查取值：枚举值、编码映射</td><td>5.6%</td><td>投放渠道 source_id 枚举维表，source_id=1 广点通 2 头条 6 15 28 分别是什么渠道<br>OTT端稿件如何判定?稿件播放明细表 dwb_ctnt_arch_play_detail_i_d 的 pid 产品平台id 哪些值代表 OTT 端?端id 值域枚举</td></tr><tr><td>排障</td><td>3.8%</td><td>查询用户 liangfangwei 名下所有 flink_stream_sql_job 类型任务的告警配置，特别是告警接收人列表<br>查询告警发送记录表 告警历史</td></tr><tr><td>找负责人、归属</td><td>3.5%</td><td>查询表 bi_sycpb.ads_brand_showclickcallup_pvuv_a_hr 的 owner<br>查询表 bili_dwd.dwd_tfc_app_buvid_d 的 owner</td></tr></tbody>
+</table>
+
+
+归纳成四类工作：
+
+1. 用表前的尽职调查：结构、来源、口径、取值，占大头。argus 的固定模板就是把这件事自动化了。
+2. 找数：知道业务概念，不知道该用哪张表。
+3. 改动前评影响：查下游任务和下游表。
+4. 平台和运维问题：工作空间、权限、基线、任务运行状态，落在能力边界外（见 §五）。
+
+「产出任务」常常是手段，不是目的。有 263 条提问（6.8%）点名要任务 SQL、代码或加工逻辑，真正想知道的是「这个数是怎么算出来的」。keeper 没有任务 SQL 原文，其中 66 条整条被拒答，其余的大多只能拿到任务和上下游表，回答不了怎么算。
+
+### 6.4 提问过程中的行为
+
+按「同一用户、同一调用方、间隔不超过 5 分钟」切分会话，共 1,133 个会话、3,476 对相邻提问。
+
+<table>
+  <colgroup><col width="142"/><col width="198"/><col width="400"/></colgroup>
+  <thead><tr><th>行为</th><th>量</th><th>说明</th></tr></thead>
+  <tbody><tr><td>原样重发</td><td>927 对（26.7%）</td><td>98.7% 发生在 2 分钟内，136 对是同一秒发出的。argus 重发 245 次，相当于其请求量的 31.8%，三个调用方里最高</td></tr><tr><td>换一张表接着问</td><td>702 对</td><td>两次提问都带表名、但不是同一张表。其中 228 对是两条固定模板，即 argus 逐张检查表</td></tr><tr><td>同一张表接着追问</td><td>93 对</td><td>追问新增的多是产出任务、血缘、下游任务；从表下钻到字段级的只有个例</td></tr><tr><td>被拒后接着问</td><td>442 对</td><td>下一问仍落在边界外的 303 对，转去召回的 70 对</td></tr><tr><td>一次传一批对象</td><td>37 条</td><td>「查询以下 N 个任务各自的产出表」，N 多为 20 或 40，全部来自 1 个用户</td></tr></tbody>
+</table>
+
+
+从这些行为看：
+
+- 重发是因为没拿到结果，不是想再问一次。 画像统计过 26% 的调用超过上游 agent 的 60 秒超时线，2 分钟内集中重发与此一致。
+- 检查的粒度是「一张表」。 用户很少围着同一张表追问，而是一张表问完整画像，再换下一张。
+- 边界外的需求是连续的。 在做运维、平台类工作的人会连着问好几个这类问题，第一次被拒时就该告诉他们去哪儿。
+- 批量是个别用户的对账任务，不是普遍需求。
+
+### 6.5 问的对象高度集中
+
+被问最多的表：
+
+<table>
+  <colgroup><col width="400"/><col width="80"/><col width="100"/><col width="100"/></colgroup>
+  <thead><tr><th>表</th><th>请求数</th><th>不同提问数</th><th>提问用户数</th></tr></thead>
+  <tbody><tr><td>b_dwb.dwb_ctnt_arch_basic_arch_wide_a_d</td><td>49</td><td>33</td><td>13</td></tr><tr><td>b_dws.dws_flow_cnsm_user_consume_detail_wide_1d_d</td><td>30</td><td>14</td><td>11</td></tr><tr><td>b_dwb.dwb_ctnt_arch_play_detail_i_d</td><td>23</td><td>15</td><td>6</td></tr><tr><td>b_dwb.dwb_ctnt_arch_play_index_i_d</td><td>23</td><td>11</td><td>4</td></tr><tr><td>b_dwb.dwb_trad_ord_elec_order_detail_info_i_d</td><td>20</td><td>11</td><td>3</td></tr><tr><td>b_ads.ads_socl_monitor_pid_from_flow_1d_d</td><td>20</td><td>12</td><td>2</td></tr><tr><td>b_dws.dws_flow_cnsm_content_consume_wide_1d_d</td><td>19</td><td>7</td><td>7</td></tr><tr><td>b_dwd.dws_lumina_agent_i_d</td><td>19</td><td>15</td><td>1</td></tr></tbody>
+</table>
+
+
+提到各业务话题的请求数（按关键词计，一条可以算进多个话题）：
+
+<table>
+  <colgroup><col width="394"/><col width="80"/></colgroup>
+  <thead><tr><th>话题</th><th>请求数</th></tr></thead>
+  <tbody><tr><td>直播</td><td>323</td></tr><tr><td>社区互动（点赞、投币、收藏、评论、弹幕、分享、关注）</td><td>289</td></tr><tr><td>数据专辑</td><td>288</td></tr><tr><td>lumina 平台自身的数据</td><td>253</td></tr><tr><td>播放</td><td>225</td></tr><tr><td>OTT / TV 端</td><td>200</td></tr><tr><td>SLA / 基线</td><td>178</td></tr><tr><td>BDO 宽表</td><td>150</td></tr><tr><td>充电 / 电商带货</td><td>70</td></tr></tbody>
+</table>
+
+
+- 用户记得的常常是业务昵称，不是表名。提到「BDO / 社区核心宽表」的请求有 186 条，其中带了库.表名的只有 6 条。
+- 有不少提问在分析 lumina 平台自身的使用数据（agent 会话、专家调用），这是平台方自己的需求，和业务用户的需求要分开看。
+
+### 6.6 本章的局限
+
+- 提问文本是 agent 改写后的，句式更多反映 agent 的 prompt 和 skill，不完全是人的原话。
+- 「目的」「话题」是按关键词粗分的，有误判，只看量级。
+- 会话按 5 分钟间隔切分；V1 是两个 dataset，跨 dataset 的连续提问可能被切成两个会话。
+- 窗口是 V1 时期的流量，重发、拆问等行为受 V1 的耗时和能力边界影响，V2 上线后会变。

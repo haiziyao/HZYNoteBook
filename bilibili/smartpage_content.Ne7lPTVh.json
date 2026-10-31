@@ -1,0 +1,1298 @@
+# GIT迁移技术方案&二期需求
+
+---
+
+结合 atlas 现有知识库能力对方案做对齐修订，主要点：SQL 模板类型用 SP、origin_type 改为 git_kb（数仓git知识）、ENUM 父子关系用独立 PARENT_ENUM、关系命名统一、新建域表并替换枚举校验、git 导入不落 resource、confidence 新实现全 80、新建独立 facade、冲突检测全量不做、来源优先级合并存量共存。
+
+---
+
+## 一、背景与目标
+
+将 dw-kb 仓库中人工维护的原子知识（YAML，~1,419 个知识点，12 个业务域）一次性导入 Atlas 知识图谱，完成知识库初始化。迁移后 git 停更，Atlas 成为唯一知识来源。
+
+服务对象：数据消费 Agent（查询分析、写 SQL）、数据生产 Agent（建需求、建表、建 ETL、写 DQC）、人工查看和编辑。
+
+### 数据规模
+
+<table>
+  <colgroup><col width="336"/><col width="260"/></colgroup>
+  <thead><tr><th>维度</th><th>估算量</th></tr></thead>
+  <tbody><tr><td>Entity 行</td><td>~3,700（1,419 + 2,300 FIELD）</td></tr><tr><td>Property 行（belongType=ENTITY）</td><td>~16,500</td></tr><tr><td>Property 行（belongType=RELATION，边属性）</td><td>~500</td></tr><tr><td>Relation 行</td><td>~5,500</td></tr><tr><td>Resource 行</td><td>0（git 导入不落 tb_atlas_resource）</td></tr></tbody>
+</table>
+
+
+---
+
+## 二、全局参数
+
+<table>
+  <colgroup><col width="200"/><col width="387"/><col width="400"/></colgroup>
+  <thead><tr><th>参数</th><th>值</th><th>说明</th></tr></thead>
+  <tbody><tr><td>实现方式</td><td>纯 Java + SnakeYAML</td><td>复用现有 YAML 解析基础设施</td></tr><tr><td>origin_type</td><td>git_kb</td><td>区分导入来源 ：数仓git知识（SourceEnum 新增，小写，P0/80）</td></tr><tr><td>effective</td><td>INACTIVE</td><td>导入后由人工审核切换</td></tr><tr><td>review_status</td><td>SUGGEST_REVIEW</td><td>全部走人工复核</td></tr><tr><td>confidence</td><td>80</td><td>数值型置信度【高置信度】，新实现 entity/property/relation 统一 80</td></tr><tr><td>orig_atom_id</td><td>{类型}{域}{en_name}</td><td>FIELD:例如 FIELD_LIVE_dws_live_user_wide.vv</td></tr><tr><td>去重键</td><td>atomType + domainAtomId + enName</td><td>三元组唯一</td></tr></tbody>
+</table>
+
+
+字段设计原则：三级别统一 scene 场景标识（知识点级 propKey availability 承载，属性/关系级靠映射；区分消费侧/生产侧可见详细度。
+
+知识来源类型：origin_type = git_kb，在 SourceEnum 中新增枚举项 git_kb（P0/80），不复用 MANUAL_DEFINED。
+
+> 说明：origin_type 字段存的是 SourceEnum.code，现有枚举值全为小写下划线（table_meta/manual_defined 等）。原方案的 GIT_KB（大写、被截断）不符合约定，故改为 git_kb。
+
+
+---
+
+## 三、类型映射
+
+<table>
+  <colgroup><col width="98"/><col width="89"/><col width="143"/><col width="400"/></colgroup>
+  <thead><tr><th>dw-kb 类型</th><th>Atlas 类型</th><th>orig_atom_id 前缀</th><th>说明</th></tr></thead>
+  <tbody><tr><td>BP</td><td>BP</td><td>BP_</td><td>对齐</td></tr><tr><td>BE</td><td>BE</td><td>BE_</td><td>对齐</td></tr><tr><td>ATTR</td><td>DIM</td><td>DIM_</td><td>全部迁入维度，用 dim_usage 区分分析维度/描述属性</td></tr><tr><td>MET</td><td>MET</td><td>MET_</td><td>对齐</td></tr><tr><td>BT</td><td>BT</td><td>BT_</td><td>对齐</td></tr><tr><td>BR</td><td>BR</td><td>BR_</td><td>Atlas 需新增 rule_type、expression 等字段</td></tr><tr><td>DT</td><td>DT</td><td>DT_</td><td>Atlas 表类型为 DT</td></tr><tr><td>SP</td><td>SP</td><td>SP_</td><td>atomType=SP，前缀 SP_（atlas EntityType 为 SP，非 SQL）</td></tr><tr><td>FAQ</td><td>FAQ</td><td>FAQ_</td><td>对齐</td></tr><tr><td>ENUM</td><td>ENUM</td><td>ENUM_</td><td>对齐</td></tr><tr><td>—</td><td>FIELD</td><td>FIELD_</td><td>从 DT.field_list 拆出为独立知识点</td></tr></tbody>
+</table>
+
+
+> 修订：原方案此处写「SP → SQL，Atlas 用 SQL」，但 atlas EntityType 枚举为 SP（非 SQL），下游所有按 atomType 分派的逻辑只认 SP，故统一为 SP，前缀 SP_。
+
+
+---
+
+## 四、逐类型映射细则
+
+公共映射规则：
+
+- atom_type → entity atomType
+- en_name → entity enName
+- tag → entity tag（JSON 数组字符串，有则写）
+- alias → entity alias（逗号分隔，有则写）
+- domain → entity domainAtomId（取域表 code，大写，见 7.3）
+
+> 修订：原方案写「通过 domain_mapping.yaml 查英文 code」，但该文件在仓库与代码中均不存在，是臆想项。改为从新建域表 tb_atlas_knowledge_domain 取 code（见 7.3）。
+
+
+### 4.1 BP — 业务过程（73）
+
+<table>
+  <colgroup><col width="334"/><col width="81"/><col width="80"/><col width="95"/><col width="80"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注</th><th>来源</th></tr></thead>
+  <tbody><tr><td>name 名称 / description 描述</td><td></td><td>否</td><td></td><td>GIT</td></tr><tr><td>process_steps 步骤</td><td></td><td>否</td><td></td><td>GIT</td></tr><tr><td>nature 过程性质：用户行为 / 系统处理 / 数据展示</td><td>生产侧</td><td>是</td><td>生产侧保留</td><td>GIT</td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="240"/><col width="92"/><col width="166"/><col width="81"/><col width="293"/></colgroup>
+  <thead><tr><th>关系类型</th><th>方向</th><th>含义</th><th>是否新增</th><th>备注</th></tr></thead>
+  <tbody><tr><td>SUBJECT_ENTITY</td><td>BP → BE</td><td>业务过程的主体实体</td><td></td><td></td></tr><tr><td>OBJECT_ENTITY</td><td>BP → BE</td><td>业务过程的客体实体</td><td></td><td></td></tr><tr><td>CONTAIN_MET</td><td>BP → MET</td><td>业务过程包含指标</td><td></td><td></td></tr><tr><td>CONTAIN_ATTR</td><td>BP → DIM</td><td>业务过程关联维度</td><td></td><td></td></tr><tr><td>CONTAIN_DT</td><td>BP → DT</td><td>业务过程和数据表关系</td><td>是</td><td>关系添加属性<br>ODS/DWD/原子模型层表引用</td></tr></tbody>
+</table>
+
+
+### 4.2 BE — 业务实体（24）
+
+<table>
+  <colgroup><col width="323"/><col width="81"/><col width="80"/><col width="138"/><col width="80"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注</th><th>来源</th></tr></thead>
+  <tbody><tr><td>name 名称 / description 描述</td><td></td><td>否</td><td></td><td>GIT</td></tr><tr><td>identification 标识ID</td><td></td><td>否</td><td></td><td>GIT</td></tr><tr><td>entity_type 实体类型：核心 / 子实体 / 引用实体</td><td>生产侧</td><td>是</td><td>生产侧有用，保留</td><td>GIT</td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="229"/><col width="88"/><col width="251"/><col width="81"/><col width="364"/></colgroup>
+  <thead><tr><th>关系类型</th><th>方向</th><th>含义</th><th>是否新增</th><th>备注</th></tr></thead>
+  <tbody><tr><td>CONTAIN_ATTR</td><td>BE → DIM</td><td>业务实体拥有哪些维度（描述属性）</td><td></td><td></td></tr><tr><td>BE_REL</td><td>BE → BE</td><td>业务实体 → 业务实体</td><td>是</td><td>关系添加属性<br>relation_type/cardinality/foreign_key 等</td></tr><tr><td>PRIMARY_DT</td><td>BE → DT</td><td>业务实体 → 数据表（主表）</td><td>是</td><td></td></tr></tbody>
+</table>
+
+
+### 4.3 DIM — 维度（766，原 ATTR）
+
+<table>
+  <colgroup><col width="327"/><col width="81"/><col width="80"/><col width="400"/><col width="80"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注</th><th>来源</th></tr></thead>
+  <tbody><tr><td>name 名称 / en_name 英文名 / description 描述</td><td></td><td>否</td><td></td><td></td></tr><tr><td>dim_usage 维度用途：分析维度 / 描述属性</td><td></td><td>否</td><td>Atlas 已有，由 dw-kb is_dimension 映射</td><td></td></tr><tr><td>attribute_type 属性类型：标识 / 简单 / 衍生</td><td>生产侧</td><td>是</td><td>生产 Agent 建表时区分主键和普通字段</td><td></td></tr><tr><td>data_type 数据类型</td><td>生产侧</td><td>是</td><td>Agent 建表/写 CAST 时需要</td><td></td></tr><tr><td>dimension_type 维度类型</td><td></td><td></td><td>❌ 不保留</td><td></td></tr><tr><td>source_type 来源类型</td><td></td><td></td><td>❌ 不保留，知识生成器的内部记录</td><td></td></tr><tr><td>source_id / source_field</td><td></td><td></td><td>❌ 不保留，改为新建关系类型：属性→字段/表/规则（需椰子确认）</td><td></td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="229"/><col width="295"/><col width="166"/><col width="81"/><col width="95"/></colgroup>
+  <thead><tr><th>关系类型</th><th>方向</th><th>含义</th><th>是否新增</th><th>备注</th></tr></thead>
+  <tbody><tr><td>CONTAIN_ENUM</td><td>DIM → ENUM</td><td>维度包含枚举值</td><td></td><td></td></tr><tr><td></td><td>DIM → DT/FIELD/BR</td><td></td><td></td><td>消费侧可能会用到：用户进一步咨询的时候，通用关系，不属于生产侧独有</td></tr></tbody>
+</table>
+
+
+### 4.4 MET — 指标（243）
+
+<table>
+  <colgroup><col width="327"/><col width="81"/><col width="80"/><col width="400"/><col width="80"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注</th><th>来源</th></tr></thead>
+  <tbody><tr><td>name 名称 / en_name 英文名 / description 描述</td><td></td><td>否</td><td></td><td></td></tr><tr><td>unit 单位</td><td></td><td>否</td><td></td><td></td></tr><tr><td>alias 别名</td><td></td><td>否</td><td></td><td></td></tr><tr><td>tag 标签</td><td></td><td>否</td><td></td><td></td></tr><tr><td>granularity_limits 粒度限制</td><td></td><td>否</td><td></td><td></td></tr><tr><td>metric_type 指标类型：原子 / 衍生 / 复合</td><td></td><td>是</td><td></td><td></td></tr><tr><td>aggregation 聚合方式</td><td>生产侧</td><td>是</td><td>原子指标没有 expression，aggregation 是唯一聚合说明</td><td></td></tr><tr><td>data_type 数据类型</td><td>生产侧</td><td>是</td><td>Agent 建表/写 CAST 时需要</td><td></td></tr><tr><td>is_template 是否模板</td><td>生产侧</td><td>是</td><td>标识为生成时校验辅助字段</td><td></td></tr><tr><td>instances 模板实例列表</td><td>生产侧</td><td>是</td><td></td><td></td></tr><tr><td>expression 计算表达式</td><td>生产侧</td><td>是</td><td></td><td></td></tr><tr><td>expression_type 表达式类型</td><td>生产侧</td><td>是</td><td>❌ 不保留，LLM 能直接读 expression</td><td></td></tr><tr><td>derivation_rule 衍生规则</td><td></td><td>是</td><td>❌ 不保留，实为关系（→BR）且 derivation_description 已含同等信息</td><td></td></tr><tr><td>derivation_description 衍生说明</td><td></td><td>是</td><td>expression 的人话版本</td><td></td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="291"/><col width="103"/><col width="166"/><col width="81"/><col width="80"/></colgroup>
+  <thead><tr><th>关系类型</th><th>方向</th><th>含义</th><th>是否新增</th><th>备注</th></tr></thead>
+  <tbody><tr><td>DERIVED_MET</td><td>MET → MET</td><td>指标来源于另一个指标</td><td></td><td></td></tr><tr><td>FILTER_BY_DIM_ATTR</td><td>MET → DIM</td><td>衍生指标限定维度</td><td></td><td></td></tr><tr><td>CONTAIN_SP</td><td>MET → SP</td><td>指标关联 SQL 模板</td><td>是</td><td></td></tr></tbody>
+</table>
+
+
+### 4.5 BT — 业务术语（22）
+
+<table>
+  <colgroup><col width="241"/><col width="81"/><col width="80"/><col width="301"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注（产品）</th></tr></thead>
+  <tbody><tr><td>similar_terms 相似术语</td><td></td><td>否</td><td></td></tr><tr><td>term_type 术语类型</td><td></td><td></td><td>❌ 不保留，量纲已废弃，剩余全是业务概念</td></tr><tr><td>data_type / unit</td><td></td><td></td><td>❌ 不保留，随量纲废弃</td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="186"/><col width="119"/><col width="80"/><col width="81"/><col width="80"/></colgroup>
+  <thead><tr><th>关系类型</th><th>方向</th><th>含义</th><th>是否新增</th><th>备注</th></tr></thead>
+  <tbody><tr><td>REL_ATOM</td><td>BT <- 任意原子</td><td></td><td></td><td></td></tr></tbody>
+</table>
+
+
+### 4.6 BR — 业务规则（63）
+
+<table>
+  <colgroup><col width="395"/><col width="81"/><col width="80"/><col width="266"/><col width="81"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注</th><th>生成逻辑</th></tr></thead>
+  <tbody><tr><td>name 名称 / description 描述</td><td></td><td>否</td><td></td><td></td></tr><tr><td>rule_type 规则类型：计算规则 / 分类规则 / 检查规则</td><td>生产侧</td><td>是</td><td></td><td></td></tr><tr><td>expression 规则表达式</td><td>生产侧</td><td>是</td><td></td><td></td></tr><tr><td>expression_type 表达式类型：sql / math / psis_cubeeudo</td><td>生产侧</td><td>是</td><td>❌ 不保留，LLM 能直接读 expression</td><td></td></tr><tr><td>output_type 输出数据类型</td><td></td><td></td><td>❌ 不保留</td><td></td></tr><tr><td>applicable_to 适用类型</td><td></td><td></td><td>❌ 不保留</td><td></td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="190"/><col width="119"/><col width="80"/><col width="81"/><col width="80"/></colgroup>
+  <thead><tr><th>关系类型</th><th>方向</th><th>含义</th><th>是否新增</th><th>备注</th></tr></thead>
+  <tbody><tr><td>REL_ATOM</td><td>BT → 任意原子</td><td></td><td></td><td></td></tr></tbody>
+</table>
+
+
+### 4.7 DT — 数据表（45，原 DT）
+
+<table>
+  <colgroup><col width="374"/><col width="81"/><col width="80"/><col width="287"/><col width="400"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注（产品）</th><th>来源</th></tr></thead>
+  <tbody><tr><td>name 名称 / en_name 英文名 / description 描述</td><td></td><td>否</td><td></td><td></td></tr><tr><td>update_frequency 更新频率 / partition_fields 分区字段</td><td>生产侧</td><td>否</td><td></td><td></td></tr><tr><td>table_layer 数仓分层：ODS/DWD/DWS/DM</td><td>生产侧</td><td>是</td><td>原 table_type 拆分</td><td>"事实表"【DM】,"维度表"【DIM】,"宽表"【DWS】,"ODS表","DWD表"</td></tr><tr><td>table_model_type 建模类型：事实表/维度表/宽表</td><td>生产侧</td><td>是</td><td>原 table_type 拆分</td><td>GIT</td></tr><tr><td>granularity 粒度 /<br> is_cube 是否Cube表</td><td>生产侧</td><td>否</td><td></td><td>LLM推理【is_cube】</td></tr><tr><td>usage_guide 使用说明                                        </td><td></td><td>否</td><td></td><td>LLM推理</td></tr><tr><td>primary_keys 主键 / foreign_keys 外键</td><td>生产侧</td><td>否</td><td></td><td>是否必须：<br>primary_keys：git表中有就采集，没有默认不采集<br>foreign_keys：git表中有就采集，没有默认不采集</td></tr><tr><td>field_list 字段列表</td><td>生产侧</td><td>—</td><td>迁移为独立的【字段】类型知识点</td><td></td></tr><tr><td>tb_check_rules 表级DQC规则</td><td></td><td></td><td>❌ 不保留，暂时用不上，待有需求再增加</td><td></td></tr></tbody>
+</table>
+
+
+### 4.8 SP — SQL 模板（42，原 SP）
+
+<table>
+  <colgroup><col width="222"/><col width="81"/><col width="80"/><col width="208"/><col width="81"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注（产品）</th><th>生成逻辑</th></tr></thead>
+  <tbody><tr><td>sql_content SQL模板</td><td></td><td>否</td><td>最核心消费字段</td><td></td></tr><tr><td>parameters 参数定义</td><td></td><td>否</td><td></td><td></td></tr><tr><td>sql_dialect SQL方言</td><td></td><td>否</td><td>Agent 需要知道在哪个引擎跑</td><td></td></tr><tr><td>applicable_scenarios 适用场景</td><td></td><td>否</td><td></td><td></td></tr><tr><td>performance_tips 性能建议</td><td>生产侧</td><td>否</td><td></td><td></td></tr><tr><td>output_example 输出样例</td><td></td><td>否</td><td></td><td></td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="80"/><col width="218"/><col width="412"/></colgroup>
+  <thead><tr><th>关系</th><th>关系类型</th><th>说明</th></tr></thead>
+  <tbody><tr><td>relations</td><td>SP → DT 【DEPEND_TABLE】</td><td>消费：表到SQL<br>生产侧：都有 <br>SQL模版 找到 表，表的层级（scope），当前表从哪里生产的（底表） 表 - 》字段-〉指标-》业务过程</td></tr></tbody>
+</table>
+
+
+### 4.9 FAQ — 常见问题（8）
+
+<table>
+  <colgroup><col width="133"/><col width="81"/><col width="80"/><col width="80"/><col width="80"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注</th><th>来源</th></tr></thead>
+  <tbody><tr><td>question 问题</td><td></td><td>否</td><td></td><td>GIT</td></tr><tr><td>answer 答案</td><td></td><td>否</td><td></td><td>GIT</td></tr><tr><td>category 分类</td><td></td><td>否</td><td></td><td>GIT</td></tr><tr><td>keywords 关键词</td><td></td><td>否</td><td></td><td>GIT</td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="80"/><col width="237"/><col width="80"/></colgroup>
+  <thead><tr><th>关系</th><th>关系类型</th><th>说明</th></tr></thead>
+  <tbody><tr><td>relations</td><td>REL_ATOM  【FAQ <- 任意原子】</td><td></td></tr></tbody>
+</table>
+
+
+### 4.10 ENUM — 枚举（133）
+
+<table>
+  <colgroup><col width="185"/><col width="81"/><col width="80"/><col width="304"/><col width="80"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注（产品）</th><th>来源</th></tr></thead>
+  <tbody><tr><td>enum_values 枚举值列表</td><td></td><td>否</td><td></td><td></td></tr><tr><td>parent_enum 父枚举</td><td></td><td>否</td><td>通过 PARENT_ENUM 关系承载（见第五节）</td><td></td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="200"/><col width="127"/><col width="81"/><col width="81"/><col width="80"/></colgroup>
+  <thead><tr><th>关系类型</th><th>方向</th><th>含义</th><th>是否新增</th><th>备注</th></tr></thead>
+  <tbody><tr><td>PARENT_ENUM</td><td>ENUM → ENUM</td><td>父子层级</td><td>是</td><td></td></tr></tbody>
+</table>
+
+
+### 4.11 FIELD — 字段（~2,300）
+
+<table>
+  <colgroup><col width="327"/><col width="81"/><col width="80"/><col width="400"/><col width="308"/></colgroup>
+  <thead><tr><th>字段</th><th>适用场景</th><th>新增</th><th>备注</th><th>来源</th></tr></thead>
+  <tbody><tr><td>name 名称 / en_name 英文名 / description 描述</td><td></td><td>否</td><td></td><td></td></tr><tr><td>data_type 数据类型</td><td></td><td>否</td><td></td><td></td></tr><tr><td>is_partition 是否分区字段</td><td></td><td>否</td><td></td><td>从partition_fields采集</td></tr><tr><td>is_foreign_key 是否外键</td><td></td><td>否</td><td></td><td></td></tr><tr><td>rollupable 是否可聚合上卷</td><td></td><td>否</td><td></td><td></td></tr><tr><td>earliest_data_date 最早数据日期</td><td></td><td>否</td><td></td><td></td></tr><tr><td>scene 场景标识：消费侧/生产侧/都不可用</td><td></td><td>是</td><td>EAV propKey availability（非 entity 表列；FIELD 与非 FIELD 通用）。FIELD 的 availability 取值 ∈ {CONSUME, PRODUCE, UNAVAILABLE}，默认 UNAVAILABLE；废弃字段标 UNAVAILABLE。【合并 P1+P2】availability propKey 沿用（决策 U 原名，决策 W 合并后保留此 propKey 名）。走 buildProp（TableFieldSyncFacadeService:689-702）+ knowledgePropertyService.upsert。git 无对应信息，由 Keeper 同步/人工/HTTP 写底座写入</td><td>Keeper 元信息/人工</td></tr><tr><td>keys Map字段key列表</td><td>生产侧</td><td>是</td><td>Atlas 需新增。  参考表：<br>b_dwb.dwb_ctnt_arch_play_detail_i_d</td><td></td></tr><tr><td>field_check_rule 字段级DQC规则</td><td></td><td></td><td>❌ 不保留，暂时用不上，待有需求再增加</td><td></td></tr></tbody>
+</table>
+
+
+<table>
+  <colgroup><col width="252"/><col width="141"/><col width="166"/><col width="81"/><col width="400"/></colgroup>
+  <thead><tr><th>关系类型</th><th>方向</th><th>含义</th><th>是否新增</th><th>备注</th></tr></thead>
+  <tbody><tr><td>BIND_MEANING</td><td>FIELD → MET/DIM</td><td>物理字段绑定业务语义</td><td></td><td></td></tr><tr><td>BELONG_TAB</td><td>FIELD → DT</td><td>字段属于数据表</td><td></td><td></td></tr><tr><td>FIELD_ENUM</td><td>FIELD → ENUM</td><td>字段直接引用枚举值</td><td>是</td><td>需求 6.1 [#11：dw-kb](#11：dw-kb) field_list.enum_atom 直接引用枚举，不经过维度；迁移时从 enum_atom 字段建直接关系</td></tr></tbody>
+</table>
+
+
+> en_name 格式对齐（存量共存关键）：FIELD 的 en_name 统一为 库.表.字段（复用 KnowledgeAtomIds.fieldEnName），与 atlas 存量 Keeper FIELD 三元组对齐；命中时走来源优先级合并，不产生重复行。见 10.3。
+
+
+---
+
+## 五、关系类型清单
+
+> 目标 22 种 = Atlas 原有 12 + 新增 10（其中已确认 6，余 4 待确认，见末尾「待确认关系清单」）。
+
+
+### Atlas 原有（12）
+
+```
+SUBJECT_ENTITY      BP → BE        主体实体
+OBJECT_ENTITY       BP → BE        客体实体
+CONTAIN_MET         BP → MET       业务过程包含指标
+CONTAIN_ATTR        BE → DIM       业务实体拥有维度
+CONTAIN_ENUM        DIM → ENUM     维度包含枚举值
+AGG_BY_ATTR         MET → DIM      指标聚合依据维度（本次不导入）
+FILTER_BY_DIM_ATTR  MET → DIM      衍生指标限定维度
+DERIVED_MET         MET → MET      指标派生血缘
+BIND_MEANING        FIELD → DIM/MET 字段绑定语义
+BELONG_TAB          FIELD → TAB    字段属于表
+DEPEND_TABLE        SQL → TAB      SQL 依赖表
+REL_ATOM            FAQ → 任意      FAQ 关联原子
+```
+
+### 新增（已确认 6 个）
+
+```
+CONTAIN_SP         MET → SP        指标关联SQL模板（核心消费路径）
+CONTAIN_DT         BP → DT         业务过程关联数据表（带边属性）
+BE_REL             BE → BE         业务实体间关系（带边属性）
+PRIMARY_DT         BE → DT         实体主表
+PARENT_ENUM        ENUM → ENUM      枚举父子层级
+FIELD_ENUM         FIELD → ENUM    字段直接引用枚举值
+
+补充三个关系  DIM - 》字段 / 业务规则 / 表
+```
+
+> 修订：
+> - MET→SQL 关系统一为 CONTAIN_SP。
+> - ENUM→ENUM 父子用独立 PARENT_ENUM，不复用 CONTAIN_ENUM（后者已是 DIM→ENUM，单值 relationType 无法区分两种语义）。
+> - FIELD→ENUM 直接关系用独立 FIELD_ENUM。
+
+
+#### BE_REL
+
+BE → BE         业务实体间关系（带边属性）
+
+<table>
+  <colgroup><col width="110"/><col width="400"/></colgroup>
+  <thead><tr><th>relation_type</th><th>语义</th></tr></thead>
+  <tbody><tr><td>来源</td><td>当前实体从目标实体"产生"或"归属于"目标（子→父的方向）</td></tr><tr><td>继承</td><td>当前实体是目标实体的子类型/角色延伸</td></tr><tr><td>下游</td><td>当前实体是目标实体的"消费者"或"下游关联方"</td></tr></tbody>
+</table>
+
+
+```
+                ┌─────────────┐
+                │ be_user_member│ (通用域)
+                └──────┬──────┘
+                       │ 继承(1:1)
+                ┌──────▼──────┐          ┌──────────────┐
+          ┌─────│be_live_anchor│◄─────────│ be_live_guild │
+          │     └──────┬──────┘  多对一    └──────────────┘
+          │            │            来源            公会
+          │      来源  │  下游(1:1)
+          │     (多对一)│
+          │     ┌──────▼──────┐
+          │     │ be_live_room │◄──── be_live_area (一对多,下游)
+          │     └──────┬──────┘◄──── be_live_gift (多对多,下游)
+          │            │
+          │      来源  │  来源
+          │     (多对一)│ (多对一)
+          │     ┌──────▼──────┐     ┌──────────────┐
+          │     │be_live_session│────►│ be_live_clip  │
+          │     └─────────────┘ 来源 └──────┬───────┘
+          │           直播场次    (多对一)  │ 继承(1:1)
+          │                               │
+          │                        ┌──────▼──────┐
+          └────────────────────────│ be_live_order│
+                              来源  └─────────────┘
+                              (多对一)   订单
+```
+
+### 新增关系类型的边属性
+
+通过 tb_atlas_property（belongType="RELATION" + belongRelId）承载，无需改表结构。
+
+但该能力当前为休眠态：KnowledgeProperty.setBelongRelId 零调用方、KnowledgePropertyMapper 无 selectByBelongRelId(s)、RelVO 无边属性字段、toRelVOList 不加载边属性——写入与读取两条链路本期需端到端新建（见 10.7）。产品页面上用户作为关系属性管理，对底层存储实现无感知。
+
+#### CONTAIN_DT 边属性
+
+<table>
+  <colgroup><col width="80"/><col width="240"/><col width="119"/><col width="203"/><col width="194"/></colgroup>
+  <thead><tr><th>propKey</th><th>来源</th><th>适用范围</th><th>示例</th><th>来源</th></tr></thead>
+  <tbody><tr><td>layer</td><td>YAML 顶层 key</td><td>全部</td><td>ODS / DWD / atomic_model</td><td>GIT :  table_type</td></tr><tr><td>role</td><td>ods_tables[].role</td><td>仅 ODS</td><td>primary / supplement</td><td>GIT</td></tr><tr><td>join_key</td><td>ods_tables[].join_key</td><td>仅 supplement</td><td>oid,type,mid</td><td>GIT</td></tr><tr><td>scope</td><td>dt git</td><td>DWD/原子层</td><td>全量 / 稿件</td><td>GIT</td></tr><tr><td>filter</td><td>dwd/atomic_model_tables[].filter</td><td>DWD/原子层</td><td>video_type='video'</td><td>GIT</td></tr></tbody>
+</table>
+
+
+#### BE_REL 边属性
+
+<table>
+  <colgroup><col width="147"/><col width="245"/><col width="144"/></colgroup>
+  <thead><tr><th>propKey</th><th>来源</th><th>示例</th></tr></thead>
+  <tbody><tr><td>relation_type</td><td>relationships[].relation_type</td><td>来源 / 继承 / 下游</td></tr><tr><td>cardinality</td><td>relationships[].cardinality</td><td>一对多</td></tr><tr><td>foreign_key</td><td>relationships[].foreign_key</td><td>ruid</td></tr><tr><td>target_key</td><td>relationships[].target_key</td><td>mid</td></tr><tr><td>established_by_bp</td><td>relationships[].established_by_bp</td><td>bp_live_broadcast</td></tr><tr><td>rel_description</td><td>relationships[].description</td><td>主播继承自用户</td></tr></tbody>
+</table>
+
+
+---
+
+## 六、架构流程
+
+### 6.1 文件读取与触发方式
+
+dw-kb 的 YAML 文件作为静态资源打包上传，程序读文件，不运行时 git clone。一次性迁移 + git 停更，无需实时拉取最新。入口为手动触发端点。
+
+> 修订：原方案声称「复用现有 YAML 解析基础设施」，但现有 KnowledgeImportFacadeService 读的是上传内容字符串、不读磁盘文件，故仅 SnakeYAML 解析可复用，文件读取为新逻辑。
+
+
+### 6.2 实现形态
+
+新建独立 facade DwKbImportFacadeService
+
+```
+atoms/**/*.yaml  →  DwKbImportFacadeService (SnakeYAML)  →  三阶段写入
+```
+
+三阶段事务写入：
+
+Phase 1: 全量 Entity INSERT
+
+- 遍历 YAML 文件，逐条反序列化
+- 按 atom_type 分派到类型映射方法
+- 解析 TAB 时同步生成 FIELD entity（从 field_list 拆出，每个 field 一个 FIELD）
+- IdWorker 生成雪花 ID
+- 构建 orig_atom_id → 雪花 ID 映射表（全部 entity 落库后映射表完整）
+- 去重：(atomType, domainAtomId, enName) 三元组查重
+
+Phase 2: 全量 Property INSERT
+
+- 用映射表替换 belongAtomId 为雪花 ID
+- belongType = "ENTITY"
+- Relation 边属性：belongType = "RELATION"，关联 Phase 1 的 relation ID
+
+Phase 3: 全量 Relation INSERT
+
+- 用映射表替换 sourceAtomId 和 targetAtomId
+- domainAtomId = source entity 的原生域（跨域归属规则，见 10.3）
+- FIELD→ENUM 关系（FIELD_ENUM）：遍历 DT 的 field_list，每个 field 若有 enum_atom 字段（引用枚举的 orig_atom_id），则建 FIELD → ENUM 关系——sourceAtomId=FIELD 的雪花 ID，targetAtomId=枚举的雪花 ID（从映射表查 ENUM_{域}_{en_name}）。dw-kb 中 enum_atom 直接引用枚举不经过维度，故走直接关系而非间接。
+
+### 6.3 幂等键与存量共存（来源优先级合并？）
+
+三阶段写入与"按来源删除重导"的安全性共同依赖幂等键。entity 命中存量时复用存量 atomId（不生成新雪花），保证下游 property/relation 能用 atomId 做稳定幂等键。需新增 findExistingAtomId(atomType, domain, enName) 返回存量 atomId。
+
+> 前提说明：现有 KnowledgeEntityService.upsert 按 atomId（雪花）查存量，git 导入每次生成新雪花会让 upsert miss → 重复 insert。故幂等键必须用三元组，命中复用存量 atomId。
+
+
+<table>
+  <colgroup><col width="80"/><col width="575"/><col width="274"/></colgroup>
+  <thead><tr><th>对象</th><th>幂等键</th><th>命中行为</th></tr></thead>
+  <tbody><tr><td>entity</td><td>(atomType, domainAtomId, enName)</td><td>复用存量 atomId + 来源优先级合并内容</td></tr><tr><td>property</td><td>(belongAtomId, propKey)</td><td>upsert 更新值</td></tr><tr><td>relation</td><td>(sourceAtomId, targetAtomId, relationType, domainAtomId)</td><td>upsert 更新值</td></tr></tbody>
+</table>
+
+
+跨域实体归属规则（已确认）：实体取原生域，关系取 source 域。
+
+- 实体的 domainAtomId = 该实体的原生业务域（如 be_user_member 取 USER 域，即便它被 LIVE 域的 BP 引用）
+- 关系的 domainAtomId = source 实体的原生域（如 bp_live_broadcast --SUBJECT_ENTITY--> be_user_member 的关系域 = LIVE）
+
+这是真·跨域：USER 域列表能看到 be_user_member，LIVE 域列表能查到指向它的跨域关系（关系域=LIVE，过 listEntities 的关系过滤）。与现有 GitImportFacadeService 把跨域实体也写成导入域（掩盖成同域）不同——新实现按原生域归属，符合语义。
+
+> 连带影响：实体取原生域后，跨域关系目标实体不在 source 域的 atoms[] 列表里，RelVO 仅返回目标 atomId 不带名称 → 两个渲染缺口暴露。本期修复。
+
+
+存量共存策略：来源优先级合并。git（P0）覆盖 LLM 推理（P2）；同为 P0 的存量（如 Keeper 元信息）保留其 effective/reviewStatus 不降级，git 新行落 INACTIVE/SUGGEST_REVIEW 待复核（输出日志，人工复核）。FIELD 的 en_name 对齐 库.表.字段（见 4.11），与存量 Keeper FIELD 三元组命中、合并而非重复。
+
+### 6.4 可重入（按来源删除重导）
+
+KnowledgeEntityMapper/KnowledgePropertyMapper/KnowledgeRelationMapper 各新增 deleteByOriginType(originType)，按 origin_type=git_kb 逻辑删除（走 @TableLogic，与现有 deleteByResourceId 风格一致，支持绑定域）。git 导入不绑定 resource，故不能复用 resource 级联删除。
+
+### 6.5 冲突检测策略
+
+全量 LLM 冲突检测不做（git 单源 curated，25k 行 LLM 成本高、ROI 低）。用三层代替：
+
+①三元组去重防重复；
+
+②来源优先级合并处理 git vs LLM；
+
+③复核门（SUGGEST_REVIEW）
+
+人工处理 git vs P0 存量真差异。补充零成本确定性规则：导入时对"三元组命中且来源不同"的实体（主要是 DT/FIELD）自动打复核标记（ATTR 类型，不调 LLM）。个别 LLM 存量多、语义重复风险高的域可单独补跑冲突检测。
+
+### 6.6 关系附带说明（两层设计：通用备注 + 结构化边属性）
+
+需求 P0-3 要求关系能附带说明，分两层：
+
+1. 通用备注：任何关系都能附一段文字说明（解释为什么建这条关系、使用时要注意什么）
+2. 结构化边属性：特定关系类型有固定的附加字段（如 CONTAIN_DT 的 layer/role/join_key/scope/filter，BE_REL 的 cardinality/foreign_key 等）
+
+方案决策：
+
+采用方案 A（两层并行），
+
+方案 B（只做通用备注）不采纳。
+
+理由：结构化边属性供 Agent 按字段精确解析（如 layer=ODS 直接过滤），通用备注供人工和 Agent 补充自由说明，两者互补不可替代。需求中"待讨论"项需要在此确定结论。
+
+两层共用同一存储机制：KnowledgeProperty（belongType="RELATION" + belongRelId），每个 propKey 一行。通用备注用固定 propKey note，结构化边属性用各自专名 propKey。读取时统一返回在 RelVO.edgeProps（Map<String,String>）中，前端按 propKey 区分渲染（note 用文本框，结构化字段用专属控件）。
+
+当前该机制休眠：写入侧 setBelongRelId 零调用方，读取侧无 selectByBelongRelIds、RelVO 无边属性字段、toRelVOList 不加载。需端到端新建。
+
+#### 6.6.1 通用备注（所有关系通用）
+
+存储：
+
+<table>
+  <colgroup><col width="180"/><col width="90"/><col width="109"/><col width="361"/></colgroup>
+  <thead><tr><th>propKey</th><th>propValue</th><th>适用范围</th><th>说明</th></tr></thead>
+  <tbody><tr><td>description</td><td>自由文本</td><td>所有关系类型</td><td>选填，不填不写行；edgeProps 为空 map 表示无备注</td></tr></tbody>
+</table>
+
+
+通过 KnowledgeProperty（belongType="RELATION" + belongRelId=关系ID）存储，与结构化边属性同表同机制。
+
+写入侧（三通道统一）：
+
+<table>
+  <colgroup><col width="157"/><col width="348"/><col width="260"/><col width="400"/></colgroup>
+  <thead><tr><th>通道</th><th>入口</th><th>note 来源</th><th>写入方式</th></tr></thead>
+  <tbody><tr><td>HTTP addRelation</td><td>RelCreateRequest 新增 note 字段（String，选填）</td><td>前端文本框</td><td>save(rel) 后取 rel.getId()，若 note 非空，写一行 KnowledgeProperty(belongType=RELATION, belongRelId=relId, propKey="note", propValue=note)</td></tr><tr><td>Git 导入 Phase 3</td><td>DwKbImportFacadeService</td><td>YAML 关系节点 remark 字段（若有）</td><td>Phase 3 创建关系后取 relationId，写 KnowledgeProperty(propKey="note")</td></tr><tr><td>MCP create_relation</td><td>tool 参数 note</td><td>Agent 传入</td><td>经 HTTP 写底座，同 HTTP 通道</td></tr></tbody>
+</table>
+
+
+> RelCreateRequest 同时新增 note（String，通用备注）和 edgeProps（Map<String,String>，结构化边属性）两个字段。note 是 edgeProps 的语法糖——内部统一转为 KnowledgeProperty(propKey="note")，与 edgeProps 各 entry 同走 upsert（复用 KnowledgePropertyServiceImpl 已有 RELATION 分支）。分开声明是为了 API 可发现性：所有关系都可用 note，edgeProps 仅特定关系类型有意义。
+
+
+读取侧：
+
+- 复用结构化边属性的读取链路（selectByBelongRelIds → RelVO.edgeProps → toRelVOList 富化，见 6.6.3 读取链路）
+- note 作为 edgeProps.get("note") 返回
+- 无结构化边属性的关系，edgeProps 中仅含 note（若有）；无任何边属性的关系，edgeProps 为空 map
+
+编辑/删除：
+
+- 编辑备注：upsert KnowledgeProperty(belongRelId, propKey="note", propValue=newNote)，命中 (belongRelId, propKey="note") 更新 propValue
+- 删除备注：逻辑删除（is_valid=0），按 (belongRelId, propKey) 精确删
+- HTTP 端点：复用 12.5 边属性端点 POST .../relations/{relId}/properties（按 propKey upsert）+ DELETE .../properties/{propId}
+
+前端交互（对齐需求 P0-3 线框）：
+
+- 添加关系流程：选关系类型 → 搜索目标 → 确认前增加可选"备注"文本框（不填也能保存），对应 RelCreateRequest.note
+- 已有关系 tag：hover 或 click 显示 edgeProps.get("note") 内容
+- 有结构化边属性的关系（如 CONTAIN_DT）：备注文本框下方追加专属表单（layer 下拉、filter 输入等），与备注同存
+
+```
+┌─────────────────────────────────────┐
+│         添加关系                  ✕  │
+├─────────────────────────────────────┤
+│ 关系类型：[包含指标        ▾]       │
+│                                     │
+│ 搜索目标：[输入关键词搜索...]       │
+│  ┌─────────────────────────────┐    │
+│  │ ☐ [通用域] 平台维度          │    │
+│  │ ☐ [消费域] 播放次数          │    │
+│  │ ☐ [本域]   观看时长          │    │
+│  └─────────────────────────────┘    │
+│                                     │
+│ 备注（选填）：                      │
+│ ┌─────────────────────────────┐    │
+│ │                             │    │
+│ └─────────────────────────────┘    │
+│                                     │
+│              [取消]  [确认]         │
+└─────────────────────────────────────┘
+```
+
+#### 6.6.2 结构化边属性（特定关系类型）
+
+CONTAIN_DT、BE_REL（及待确认的 DIM→DT/DIM→FIELD/DIM→BR 若带边属性一并纳入）有固定的附加字段，propKey 各有专名。详见第五节边属性清单。
+
+#### 6.6.3 写入链路（统一：通用备注 + 结构化边属性）
+
+git 导入 Phase 3：relation 落库后取 relationId，遍历该关系的边属性 propKey（含通用 note 与结构化各字段），逐行写 KnowledgeProperty：
+
+<table>
+  <colgroup><col width="80"/><col width="710"/></colgroup>
+  <thead><tr><th>步骤</th><th>内容</th></tr></thead>
+  <tbody><tr><td>1</td><td>relation 落库后取 relationId（KnowledgeRelation 主键 id）</td></tr><tr><td>2</td><td>遍历该关系的边属性 propKey（通用 note + 结构化字段），逐行 KnowledgeProperty：belongType="RELATION"、belongRelId=relationId、propKey/propValue 取 YAML 对应字段、domainAtomId 取 source 域、originType="git_kb"、confidence=80</td></tr><tr><td>3</td><td>幂等键 (belongRelId, propKey)，复用 KnowledgePropertyServiceImpl 已有的 BelongType.RELATION 分支（按 belongRelId 匹配 upsert）</td></tr></tbody>
+</table>
+
+
+HTTP addRelation：save(rel) 后取 rel.getId()，若 request.note 非空写一行 KnowledgeProperty(propKey="note")；遍历 request.edgeProps 各 entry 逐行写 KnowledgeProperty。幂等键同 Phase 3。
+
+边属性 propKey 清单：通用 note（所有关系可选）+ 第五节结构化边属性（BE_REL：relation_type/cardinality/foreign_key/target_key/established_by_bp/rel_description；CONTAIN_DT：layer/role/join_key/scope/filter）。
+
+#### 6.6.4 读取链路（本期做）
+
+<table>
+  <colgroup><col width="210"/><col width="386"/><col width="400"/></colgroup>
+  <thead><tr><th>改动点</th><th>位置</th><th>内容</th></tr></thead>
+  <tbody><tr><td>新增 mapper 查询</td><td>KnowledgePropertyMapper</td><td>selectByBelongRelIds(Collection<Long> belongRelIds)，按 belong_rel_id 批量查未删除边属性（含 note + 结构化 propKey，读路径现仅有 physicalDeleteByBelongRelIds，只删不读）</td></tr><tr><td>RelVO 增字段</td><td>dto/response/RelVO.java</td><td>新增 Map<String,String> edgeProps（propKey→propValue，含 note），默认空 map</td></tr><tr><td>toRelVOList 富化</td><td>KnowledgeEntityFacadeService.toRelVOList（见 12.2）</td><td>拿到本批 relation 的 id 列表 → selectByBelongRelIds 一次查出全部边属性 → 按 belongRelId 分组 → 填入各 RelVO.edgeProps</td></tr></tbody>
+</table>
+
+
+#### 6.6.5 范围与边界
+
+- 通用备注（note）：所有关系类型均可写，选填。无备注的关系不写 note 行。
+- 结构化边属性：仅 dw-kb 自带边属性的关系（CONTAIN_DT/BE_REL 及待确认的 DIM 系列）。无结构化边属性的关系不写结构化 propKey 行。
+- edgeProps 为空 map：表示该关系既无通用备注也无结构化边属性。
+- 与 12.2 的关系：边属性读取与 12.2（RelVO 补目标摘要）同改 toRelVOList 与 RelVO，属不同字段（edgeProps vs 目标 atomType/cName/domainAtomId）。本期只建边属性读取、不动 12.2；但 toRelVOList 富化逻辑应预留 12.2 接入位，避免后续重复富化循环（见第十二节结尾）。
+- 存量无影响：现有 GitImportFacadeService 把关系降级为 JSON ENTITY 属性、不建 relation，不涉及边属性；本次为新链路，不影响存量。
+
+#### 实现成本评估（代码实测）
+
+量级：小到中（偏小）——约 5–6 个文件、净增 40–60 行、无 DDL/无新表/无破坏性改动。机制"中段通、两端断"：表列、BelongType 枚举、KnowledgePropertyServiceImpl.upsert/saveOrRestore 的 RELATION 分支、按 relId 的删除链路均已就绪；缺的是写入入口与读取加载这"最后一公里"。
+
+已就绪（不动）：
+
+- KnowledgeProperty 实体 belongType/belongRelId 字段（KnowledgeProperty.java:17/27）
+- BelongType 枚举 ENTITY/RELATION（BelongType.java:11）
+- KnowledgePropertyServiceImpl.upsert/saveOrRestore 已内置 RELATION 分支（:33-37/:63-67/:82-86），传入 belongType=RELATION+belongRelId 即正确落库
+- 删除链路 logicalDeleteByBelongRelIds/physicalDeleteByBelongRelIds（KnowledgePropertyMapper:47/69）+ KnowledgeCleanupService:99/113/270/344/356
+
+需补的两端：
+
+<table>
+  <colgroup><col width="107"/><col width="400"/><col width="400"/><col width="96"/></colgroup>
+  <thead><tr><th>层</th><th>位置</th><th>改动</th><th>量</th></tr></thead>
+  <tbody><tr><td>写入入口</td><td>KnowledgeEntityFacadeService.addRelation:1442-1462</td><td>save(rel) 后取 rel.getId()：若 request.note 非空，构造 KnowledgeProperty(propKey="note") 调 upsert；遍历 request.edgeProps 各 entry 构造 KnowledgeProperty 调 upsert</td><td>+15~20 行</td></tr><tr><td>写入请求</td><td>RelCreateRequest.java:13</td><td>加 note（String）+ edgeProps（Map<String,String>）两个字段</td><td>+2 字段</td></tr><tr><td>读取 Mapper</td><td>KnowledgePropertyMapper.java</td><td>新增 selectByBelongRelIds（镜像已有 delete 的 IN 模板改 SELECT）</td><td>+5 行</td></tr><tr><td>读取 helper</td><td>KnowledgeEntityFacadeService（镜像 batchLoadProperties:2152）</td><td>batchLoadRelationProperties(relIds)：belong_type='RELATION' + in(belongRelId)</td><td>+10 行</td></tr><tr><td>读取组装</td><td>toRelVOList:2184 + 调用点 :270/:756</td><td>改签名接收属性 map 填 setEdgeProps，同步 2 调用点</td><td>+5~8 行</td></tr><tr><td>响应 DTO</td><td>RelVO.java:13</td><td>加 edgeProps 字段</td><td>+1 字段</td></tr></tbody>
+</table>
+
+
+前置确认（唯一不确定项）：仓内无 tb_atlas_property DDL 可核对，上线前对线上表 DESC tb_atlas_property 一次，确认 belong_rel_id 列 + 唯一键/索引就位（与代码改动量无关）。
+
+风险/连带：
+
+- toRelVOList 改签名要同步 listEntities:270、getEntity:756 两调用点。
+- getPanorama 的分层组装不走 RelVO，本期不暴露边属性，登记后续按需补。
+- 关系属性写入应集中在 addRelation 一处，勿散落到 git import/archive 的 setBelongType("ENTITY") 实体属性构造点（:292/443/700/692 等）。
+
+---
+
+## 七、跨域引用
+
+dw-kb 中 35% 关系为跨域（4,810 条中 1,705 条跨域），COMM 是枢纽域。跨域关系在 tb_atlas_relation 中正常存储，不受域边界限制。
+
+域归属规则（已确认）：实体取原生域，关系按 source 域。 即跨域被引用实体（如 be_user_member）的 domainAtomId 取其原生域（USER），而跨域关系（如 bp_live_broadcast --SUBJECT_ENTITY--> be_user_member）的 domainAtomId 取 source 域（LIVE）。这是真·跨域，符合语义，USER 域列表能看到 be_user_member。
+
+#### 数据库层 — 无域隔离
+
+tb_atlas_relation 只有 sourceAtomId + targetAtomId + domainAtomId。没有约束要求 source 和 target 必须在同一域：
+
+```
+-- 直播域的业务过程，引用用户域的实体 — 完全合法
+sourceAtomId: BP_live_broadcast      (实体域: LIVE)
+targetAtomId: BE_user_member         (实体域: USER)
+domainAtomId: LIVE                   (关系域: 取 source 域)
+```
+
+注意：BE_user_member 实体的 domainAtomId = USER（原生域），关系的 domainAtomId = LIVE（source 域）。两者不同，分别取值。
+
+#### 域过滤层 — 不漏跨域数据
+
+知识管理渲染路径的域过滤行为（基于现有代码确认）：
+
+<table>
+  <colgroup><col width="303"/><col width="223"/><col width="324"/><col width="400"/></colgroup>
+  <thead><tr><th>路径</th><th>实体过滤</th><th>关系过滤</th><th>跨域能否渲染</th></tr></thead>
+  <tbody><tr><td>getPanorama(domainId)</td><td>.eq(domainAtomId)</td><td>不查业务关系（仅 BELONG_TAB/HAS_FIELD）</td><td>不涉及跨域关系，正常</td></tr><tr><td>listEntities(domainId)</td><td>.eq(domainAtomId)</td><td>.eq(relation.domainAtomId)</td><td>关系按归属域过滤；跨域关系挂 source 域，在 source 域列表能查到 ✅</td></tr><tr><td>getEntity(atomId)</td><td>不按域过滤</td><td>source_atom_id=atomId 不按域过滤</td><td>出边关系正常返回 ✅</td></tr></tbody>
+</table>
+
+
+关键点：listEntities 的关系过滤条件是 .eq(relation.domainAtomId, source域)，而跨域关系的 domainAtomId 恰好取 source 域，所以跨域关系在 source 域列表里能查到，不会被过滤掉。
+
+#### 冲突检测层 — 约束是 N:1，不是域内
+
+现有冲突检测的 N:1 约束（如 CONTAIN_MET 的 target COUNT）检查的是 source-target 对，不限定域：
+
+```
+CONTAIN_MET: 同域内，同一个 MET 不能被两个不同的 BP 包含  ← 错
+CONTAIN_MET: 全局，同一个 MET 不能被两个不同的 BP 包含     ← 对
+```
+
+跨域关系同样参与约束检查，不会因为跨域而被跳过。domainAtomId 只是标识关系"挂在哪个域下"，不影响约束逻辑。
+
+> 注：本次导入不跑全量 LLM 冲突检测。N:1 约束作用域是否真为全局，实现前需回看 KnowledgeConflictFacadeService 代码确认。
+
+
+#### 跨域关联的具体场景
+
+场景 1：BP 跨域引用 BE
+
+```
+BP_live_broadcast --SUBJECT_ENTITY--> BE_user_member
+BP_inct_like      --SUBJECT_ENTITY--> BE_user_member
+BP_cnsm_play      --OBJECT_ENTITY --> BE_ctnt_arch
+```
+
+BP 天然跨域——直播的"主播"就是用户域的用户实体，互动的"点赞人"也是用户。dw-kb 数据中 35% 关系已经跨域。导入后实体归属原生域，关系归属 source 域。
+
+场景 2：其他域使用另一域的表
+
+```
+BP_cnsm_play --CONTAIN_DT--> DT_dwd_play_detail   (实体域: CNSM, 消费域的业务过程引用自己的 DWD 表)
+BP_cnsm_play --CONTAIN_DT--> DT_dwd_user_profile   (实体域: USER, 消费域的业务过程引用用户域的维度表做退维)
+```
+
+同一张表可以被多个域的 BP 通过 CONTAIN_DT 引用。表归其原生域，关系归 source 域：
+
+```
+sourceAtomId: BP_cnsm_play      (实体域: CNSM)
+targetAtomId: DT_dwd_user_profile (实体域: USER)
+domainAtomId: CNSM               (关系域: 取 source 域)
+```
+
+#### 已知渲染缺口（本期不修，登记处理）
+
+跨域实体取原生域后，以下两个渲染缺口会暴露，本期不修，登记为已知问题（见第十二节）：
+
+1. getEntity 只查出边关系：KnowledgeEntityFacadeService.getEntity:740 仅查 source_atom_id=atomId，不查 target_atom_id=atomId。被跨域引用的实体（如 be_user_member，是 bp_live_broadcast 的 SUBJECT_ENTITY 目标）在自身详情页看不到入边关系。updateEntity:865 已查双向，说明这是 getEntity 疏漏。
+2. RelVO 只返回目标 atomId，不带名称/域：RelVO.t 仅有 atomId，无 atomType/cName/domainAtomId。注：listEntities 场景已通过 buildCrossDomainRefs（:2190-2220）单独批量加载跨域 target 摘要为 XDRefVO（带 domain），前端 atomMap.get(r.t) || crossDomainRefs.find(...) 解析，列表场景不 dangling；真正 dangling 的是 getEntity 单实体详情场景——无 atoms[] 也无 crossDomainRefs 机制 → 跨域 target 渲染成裸 id。
+
+> 产品需求延期确认（P0-6）：需求 P0-6 要求"跨域关系在关系列表中标注来源域名（如 [通用域] 平台维度）"。上述渲染缺口 2 直接影响此需求——RelVO 不带目标 domainAtomId/名称，跨域关系无法标注来源域。listEntities 场景虽通过 XDRefVO 间接补齐（带 domain），但 getEntity 单实体详情场景无此机制。本期不修，需向产品确认是否可接受延期至下一迭代。若不可延期，需在 getEntity 读路径补齐 buildCrossDomainRefs 机制（量级：+15~20 行，镜像 listEntities:2190-2220），或 RelVO 增 targetDomainAtomId/targetCName 字段 + toRelVOList 批量加载。
+
+
+#### 建关系路径 — 已验证支持跨域（写路径）
+
+针对"能跨域引用别的域的知识点建关系"这一要求，已核对写路径代码，当前设计端到端满足，无需额外适配：
+
+<table>
+  <colgroup><col width="180"/><col width="187"/><col width="618"/></colgroup>
+  <thead><tr><th>环节</th><th>结论</th><th>证据</th></tr></thead>
+  <tbody><tr><td>addRelation</td><td>✅ 不校验 target 域</td><td>KnowledgeEntityFacadeService.java:1422-1442 — targetAtomId = request.getT() 原样取，从不加载 target 实体、从不比较 source/target 域；relation.domainAtomId = domainId（URL 路径变量 = source 域）</td></tr><tr><td>候选发现 getCandidates</td><td>✅ 支持跨域选 target</td><td>:1444-1447 — 显式可选 domain 参数，controller Swagger 注释直写"目标域（跨域引用）"</td></tr><tr><td>upsert 幂等</td><td>✅ 无域约束</td><td>KnowledgeRelationServiceImpl:22-69 — 纯结构四元组，不校验 source.domain==target.domain</td></tr><tr><td>N:1 约束</td><td>✅ 全局，不限域</td><td>RelationN1Validator:21-44 — COUNT 只按 atomId+relationType，无 domainAtomId 谓词；跨域关系同样参与约束，不绕过不限制</td></tr></tbody>
+</table>
+
+
+迁移 Phase 3、HTTP 写底座（13.5，复用 addRelation+getCandidates）均继承此能力。MCP 侧底层调 HTTP 底座亦继承；但 Agent 要建跨域关系需先能搜到别的域的 target atomId，MCP 是否补查询 tool 见 13.8 待确认。
+
+---
+
+## 八 业务域创建和管理
+
+新建 tb_atlas_knowledge_domain 作为知识管理域功能的数据源（不复用资产侧 tb_atlas_business_domain）。
+
+#### 现状
+
+当前知识管理域来源为 DomainEnum 枚举（枚举常量名作为 domainAtomId 的值），不依赖任何表。DomainEnum 中 11/12 个真业务域已被注释，仅 LIVE 等活跃；且英文 code 大小写不统一。4 处硬编码校验 + 1 处域列表均遍历枚举。
+
+#### 表结构
+
+```sql
+CREATE TABLE tb_atlas_knowledge_domain (
+    id           BIGINT AUTO_INCREMENT PRIMARY KEY,
+    code         VARCHAR(64)  NOT NULL COMMENT '域英文code（大写，与存量 domain_atom_id 统一），如 LIVE',
+    name         VARCHAR(64)  NOT NULL COMMENT '中文名称，如 直播域',
+    description  VARCHAR(512) COMMENT '域描述',
+    owner        VARCHAR(64)  COMMENT '负责人（企业邮箱前缀，取自 SessionHelper）',
+    sort         INT DEFAULT 0 COMMENT '排序序号（前端目录树展示顺序，小在前）',
+    is_valid     TINYINT DEFAULT 1,
+    ctime        DATETIME,
+    mtime        DATETIME,
+    UNIQUE KEY uk_code (code)
+);
+```
+
+code 统一保存大写（LIVE/USER/CNSM/INCT/FLOW/GROWTH/CTNT/UP/PRODUCE/DEVICE/COMM），与现有存量 domain_atom_id="LIVE" 大小写一致，零迁移成本。
+
+#### 与知识管理打通（替换枚举校验权威）
+
+DomainEnum 文件保留不删，但运行时校验权威改为新表。需改动 5 处：
+
+<table>
+  <colgroup><col width="564"/><col width="398"/></colgroup>
+  <thead><tr><th>位置</th><th>改动</th></tr></thead>
+  <tbody><tr><td>KnowledgeCollectFacadeService:251,400</td><td>DomainEnum.getDomainEnum(domain)==null → 查表校验</td></tr><tr><td>KnowledgeResourceFacadeService:63</td><td>同上</td></tr><tr><td>TableFieldSyncFacadeService:130</td><td>同上</td></tr><tr><td>KnowledgeEntityFacadeService.parseDomain</td><td>DomainEnum.values() 遍历 → 查表</td></tr><tr><td>ResourceFacadeService.listDomains（GET /atlas/domain/lists）</td><td>DomainEnum.values() 遍历 → 查表</td></tr></tbody>
+</table>
+
+
+#### 导入时处理
+
+Phase 0 先 seed 12 个域（code 大写 + 中文名）写入 tb_atlas_knowledge_domain。之后 Phase 1 所有 entity 的 domainAtomId 取域表 code（大写）。不再向 tb_atlas_entity 创建 DOMAIN entity。
+
+#### 8.1 CRUD API（产品化，本期支持）
+
+需求 P0-4 要求域可产品化创建/编辑/删除，不再靠后端操作。当前仓库无任何域 CRUD 代码（tb_atlas_knowledge_domain 全新表 + 全新 entity/mapper/service/facade/controller/DTO）。参照 BusinessDomain 全套分层脚手架（entity/BusinessDomain → mapper/BusinessDomainMapper(+xml) → service/BusinessDomainService(+impl) → facade/BusinessDomainFacadeService → api/http/BusinessDomainController → dto/request/BusinessDomainRequest + dto/response/BusinessDomainResponse）。
+
+路由设计：/atlas/domain 前缀已被 BusinessDomainController 和 PreambleController 共用，/atlas/domain/lists 已被占用，新增 CRUD 避开冲突用 /atlas/knowledge-domain 前缀。原 GET /atlas/domain/lists（PreambleController）保留但改实现为查新表（见"与知识管理打通"5 处之一），向后兼容前端。
+
+<table>
+  <colgroup><col width="436"/><col width="123"/><col width="400"/><col width="125"/></colgroup>
+  <thead><tr><th>端点</th><th>方法</th><th>说明</th><th>权限</th></tr></thead>
+  <tbody><tr><td>POST /atlas/knowledge-domain</td><td>创建域</td><td>body: {code, name, description, owner, sort}；code 大写唯一，查重 uk_code</td><td>owner 或管理员</td></tr><tr><td>PUT /atlas/knowledge-domain/{code}</td><td>编辑域</td><td>改 name/description/owner/sort；code 不可改（存量 domain_atom_id 外键稳定性）</td><td>owner 或管理员</td></tr><tr><td>DELETE /atlas/knowledge-domain/{code}</td><td>删除域</td><td>逻辑删除（@TableLogic）；前置校验：域下无 ACTIVE 知识点才可删</td><td>owner 或管理员</td></tr><tr><td>GET /atlas/knowledge-domain</td><td>域列表</td><td>查表，按 sort ASC, id ASC 排序，附 bp/be count（复用 countByAtomTypeGroupByDomain）</td><td>所有人</td></tr><tr><td>GET /atlas/knowledge-domain/{code}</td><td>域详情</td><td>查表单条 + owner→nickname 解析（ShielderService.getOaUsersAsMap）</td><td>所有人</td></tr><tr><td>GET /atlas/knowledge-domain/{code}/overview</td><td>域下知识点概览</td><td>按类型分组 count + 总数，见 8.3</td><td>所有人</td></tr></tbody>
+</table>
+
+
+创建域前置校验（镜像 BusinessDomainFacadeService.create 名称查重模式）：
+
+<table>
+  <colgroup><col width="92"/><col width="386"/><col width="195"/></colgroup>
+  <thead><tr><th>校验</th><th>规则</th><th>失败行为</th></tr></thead>
+  <tbody><tr><td>code 格式</td><td>大写英文字母 + 下划线，如 LIVE / CONTENT_CONSUME</td><td>400 域code格式不合法</td></tr><tr><td>code 唯一</td><td>查表 selectByCode(code) 不为空</td><td>400 域code已存在: {code}</td></tr><tr><td>name 非空</td><td>@NotBlank</td><td>框架校验拦截</td></tr><tr><td>sort</td><td>缺省 0（排在末尾）</td><td>—</td></tr></tbody>
+</table>
+
+
+删除域前置校验（防误删，镜像 BusinessDomainFacadeService.delete 级联占用校验）：
+
+<table>
+  <colgroup><col width="123"/><col width="383"/><col width="225"/></colgroup>
+  <thead><tr><th>校验</th><th>规则</th><th>失败行为</th></tr></thead>
+  <tbody><tr><td>域下知识点清零</td><td>KnowledgeEntityMapper.countByDomain(domain) == 0</td><td>400 域下仍有知识点，无法删除</td></tr><tr><td>域存在且有效</td><td>查表 is_valid=1</td><td>404 域不存在</td></tr></tbody>
+</table>
+
+
+> 删除为逻辑删除（@TableLogic 置 is_valid=0），不物理删。域下有知识点时阻断，要求先转移知识点到其他域（见第九节）再删。
+
+
+#### 8.2 域列表与排序
+
+GET /atlas/knowledge-domain 返回 List<KnowledgeDomainVO>，排序规则：
+
+```sql
+SELECT * FROM tb_atlas_knowledge_domain
+WHERE is_valid = 1
+ORDER BY sort ASC, id ASC
+```
+
+- sort 字段控制前端目录树展示顺序（小在前），默认 0。
+- Phase 0 seed 12 个域时按业务域重要性赋 sort（如 COMMON=1, LIVE=2, USER=3, ...），非全 0。
+- 前端可拖拽调整顺序 → PUT /atlas/knowledge-domain/{code} 更新 sort（或批量 PUT /atlas/knowledge-domain/sort 接收 [{code, sort}]）。
+- bp/be count 复用 KnowledgeEntityMapper.countByAtomTypeGroupByDomain("BP") + countByAtomTypeGroupByDomain("BE")（现有方法，改入参为查表 code）。
+- owner → nickname 批量解析：调 ShielderService.getOaUsersAsMap(ownerList)，填入 VO（镜像 BusinessDomainFacadeService.list:199）。
+
+与原 GET /atlas/domain/lists 的关系：原端点保留（PreambleController），实现改为查新表（5 处改动之一），返回结构对齐 DomainVO。新端点 GET /atlas/knowledge-domain 返回更完整的 KnowledgeDomainVO（含 description/owner/sort）。前端迁移到新端点后可废弃旧端点。
+
+#### 8.3 域下知识点概览
+
+需求 P0-4 要求"进入某个域后，按类型分组展示该域的知识点数量和列表"。
+
+GET /atlas/knowledge-domain/{code}/overview 返回该域下每种原子类型的数量：
+
+新增 mapper 方法（一次查出全类型分组，避免循环调 12 次）：
+
+```java
+// KnowledgeEntityMapper.java 新增
+@Select("SELECT atom_type AS atomType, COUNT(*) AS count " +
+        "FROM tb_atlas_entity " +
+        "WHERE is_valid = 1 AND domain_atom_id = #{domainAtomId} " +
+        "GROUP BY atom_type")
+List<Map<String, Object>> countGroupByDomainAndAtomType(@Param("domainAtomId") String domainAtomId);
+```
+
+> 现有 countByAtomTypeGroupByDomain(atomType) 只接受单个 atomType 按 domain 分组（用于 listDomains）。概览是单 domain 全 atomType，方向不同，故新增双维度方法。
+
+
+响应结构（KnowledgeDomainOverviewVO）：
+
+```json
+{
+  "code": "LIVE",
+  "name": "直播域",
+  "total": 285,
+  "typeCounts": [
+    {"atomType": "BP",    "count": 12},
+    {"atomType": "BE",    "count": 8},
+    {"atomType": "MET",   "count": 24},
+    {"atomType": "DIM",   "count": 76},
+    {"atomType": "FIELD", "count": 130},
+    {"atomType": "DT",    "count": 15},
+    ...
+  ]
+}
+```
+
+- typeCounts 按 EntityType 枚举 12 种类型返回，count=0 的类型也列出（前端灰显）。
+- 列表详情（某类型的知识点列表）：前端点某类型跳转 listEntities(domainId, type)（现有接口，已支持按 atomType 过滤，见 KnowledgeEntityFacadeService:219-221），无需新增端点。
+
+#### 8.4 权限控制
+
+需求 P0-4 要求"创建域 / 域内知识点编辑：域 owner 或平台管理员"。
+
+现状：仓库内零鉴权基础设施——@PreAuthorize/isAdmin/hasRole 全仓无命中，SystemController 高危运维接口也裸奔。owner 字段当前仅用于展示，无校验逻辑。
+
+本期设计（从零搭建最小可用权限，登记鉴权为待补）：
+
+<table>
+  <colgroup><col width="95"/><col width="400"/><col width="247"/></colgroup>
+  <thead><tr><th>角色</th><th>判定方式</th><th>权限</th></tr></thead>
+  <tbody><tr><td>域 owner</td><td>当前用户（SessionHelper.getLoginUsername(request)，镜像 OperationLogAspect:322-340）== 域表 owner</td><td>创建/编辑/删除域 + 域内知识点编辑</td></tr><tr><td>平台管理员</td><td>本期待补（无角色体系），临时方案：配置文件白名单（如 atlas.admin.users=yangwentao01,...）</td><td>全权限</td></tr><tr><td>普通用户</td><td>其他人</td><td>仅查看</td></tr></tbody>
+</table>
+
+
+实现位置（新建 KnowledgeDomainFacadeService 内私有方法 checkPermission(domain, request)）：
+
+```java
+private void checkPermission(KnowledgeDomain domain, HttpServletRequest request) {
+    String currentUser = SessionHelper.getLoginUsername(request); // 可能返回 null
+    if (currentUser == null || currentUser.isEmpty()) {
+        throw new BusinessException("未登录");
+    }
+    // owner 校验
+    if (currentUser.equals(domain.getOwner())) {
+        return;
+    }
+    // 管理员校验（临时白名单，待补角色体系）
+    if (adminUsers.contains(currentUser)) {
+        return;
+    }
+    throw new BusinessException("无权限操作该域，需域 owner 或平台管理员");
+}
+```
+
+> 鉴权待补：仓库无统一鉴权框架，本期用白名单兜底。后续接入统一权限平台后，adminUsers 白名单替换为角色查询。前端按 owner == 当前用户 或管理员标志控制"编辑域"/"删除域"按钮显隐。
+
+
+#### 8.5 分层实现清单（参照 BusinessDomain 全套）
+
+<table>
+  <colgroup><col width="108"/><col width="574"/><col width="340"/></colgroup>
+  <thead><tr><th>层</th><th>新建类</th><th>参照</th></tr></thead>
+  <tbody><tr><td>entity</td><td>entity/KnowledgeDomain.java（@TableName("tb_atlas_knowledge_domain")，extends BaseEntity）</td><td>BusinessDomain.java</td></tr><tr><td>mapper</td><td>mapper/KnowledgeDomainMapper.java + KnowledgeDomainMapper.xml（selectByCode、selectListOrderBySort）</td><td>BusinessDomainMapper.java(+xml)</td></tr><tr><td>service</td><td>service/KnowledgeDomainService.java + service/impl/KnowledgeDomainServiceImpl.java（extends ServiceImpl，getByCode、list）</td><td>BusinessDomainService.java(+impl)</td></tr><tr><td>facade</td><td>facade/KnowledgeDomainFacadeService.java（create/update/delete/getById/list/overview + checkPermission + owner→nickname）</td><td>BusinessDomainFacadeService.java</td></tr><tr><td>controller</td><td>api/http/KnowledgeDomainController.java（@RequestMapping("/atlas/knowledge-domain")）</td><td>BusinessDomainController.java</td></tr><tr><td>request DTO</td><td>dto/request/KnowledgeDomainRequest.java（code/name/description/owner/sort，@NotBlank）</td><td>BusinessDomainRequest.java</td></tr><tr><td>response VO</td><td>dto/response/KnowledgeDomainVO.java（含 code/name/description/owner/ownerNickname/sort/bpCount/beCount）</td><td>BusinessDomainResponse.java + DomainVO.java</td></tr><tr><td>overview VO</td><td>dto/response/KnowledgeDomainOverviewVO.java（code/name/total/typeCounts）</td><td>新建</td></tr></tbody>
+</table>
+
+
+量级评估：约 8 个新文件、净增 ~300–400 行，无破坏性改动。KnowledgeEntityMapper 新增 1 个 count 方法（+5 行）。5 处硬编码校验改动各 1–2 行替换。
+
+## 九、知识点域间转移（本期支持）
+
+### 9.1 背景与现状
+
+知识点的 domainAtomId 创建后只读，无任何转移/改域能力。EntityTransferRequest{targetDomain} DTO 桩存在但零引用；仅 HTTP 暴露（不进 MCP，维护操作 Agent 暂不调用）。
+
+### 9.2 安全转移设计
+
+关键事实（决定形状）：atomId 是雪花、不编码域、转移不变（IdWorker.getIdStr() KnowledgeEntityFacadeService:1236，entity 字段 javadoc 写的 {类型}{域}{名称} 已过时失真）→ 所有 atomId 键 FK 天然有效：property.belongAtomId / relation.source·targetAtomId / conflict.entityAtomIds 转移后仍解析，无需重写 FK。
+
+前置门（全过才转）：
+
+<table>
+  <colgroup><col width="95"/><col width="354"/><col width="400"/></colgroup>
+  <thead><tr><th>门</th><th>规则</th><th>依据</th></tr></thead>
+  <tbody><tr><td>冲突清零</td><td>实体无未解决冲突；有则阻断</td><td>冲突清零后无残留需重盖</td></tr><tr><td>目标域去重</td><td>目标域 B 无 ACTIVE 实体 (atomType, enName) 同名</td><td>应用层预校验（DB 唯一索引未实现，publishEntity:1272 绕过检查）</td></tr><tr><td>目标域合法</td><td>targetDomain 在新域表（7.3）有效</td><td>域表作权威</td></tr></tbody>
+</table>
+
+
+单事务内 mutate：
+
+1. 重盖章实体：entity.setDomainAtomId(B) + updateById。effective/reviewStatus/originType 原状态保留（只改 domainAtomId，不打复核标记）。
+2. 重盖出边关系（sourceAtomId=X）：relation.setDomainAtomId(B) 批量 update —— 否则 listEntities 按 domainAtomId=B 过滤，出边关系仍盖 A 会从 B 视图消失 → 渲染断。符合 addRelation 的"关系取 source 域"约定。
+
+构造安全（不破，无需动作）：
+
+<table>
+  <colgroup><col width="251"/><col width="400"/></colgroup>
+  <thead><tr><th>项</th><th>原因</th></tr></thead>
+  <tbody><tr><td>入边关系（实体为 target，源在 C）</td><td>按 targetAtomId 无域过滤查；domainAtomId=C 仍符合"关系取 source 域"，FK 仍解析</td></tr><tr><td>N:1 约束</td><td>RelationN1Validator 全局按 atomId，无域谓词</td></tr><tr><td>property</td><td>无 domainAtomId 列（经 belongAtomId 间接继承实体域），不动</td></tr><tr><td>冲突行</td><td>前置门已清零</td></tr></tbody>
+</table>
+
+
+### 9.3 API
+
+复用 EntityTransferRequest{targetDomain} 桩：POST /atlas/knowledge/{domainId}/entities/{atomId}/transfer，body {targetDomain}。
+
+### 9.4 权限控制
+
+需求 P1-1 明确要求"权限：源域 owner 或平台管理员可操作"。
+
+现状：仓库零鉴权基础设施（同 8.4），EntityTransferRequest 桩零引用，无任何权限校验代码。写入路径也无 caller 身份标识机制（EntityCreateRequest 无 caller 字段，originType 全硬编码，见 12.5.1）。
+
+本期设计（复用 8.4 的最小权限方案，保持一致）：
+
+<table>
+  <colgroup><col width="97"/><col width="400"/><col width="89"/></colgroup>
+  <thead><tr><th>角色</th><th>判定方式</th><th>转移权限</th></tr></thead>
+  <tbody><tr><td>源域 owner</td><td>当前用户（SessionHelper.getLoginUsername(request)，镜像 OperationLogAspect:322-340）== 源域表 owner</td><td>✅ 可转移</td></tr><tr><td>平台管理员</td><td>本期待补（无角色体系），临时方案：配置文件白名单（如 atlas.admin.users=yangwentao01,...），同 8.4</td><td>✅ 全权限</td></tr><tr><td>普通用户</td><td>其他人</td><td>❌ 拒绝</td></tr></tbody>
+</table>
+
+
+实现位置：KnowledgeEntityFacadeService.transferEntity 内新建 checkTransferPermission(sourceDomainId, request)——取 SessionHelper.getLoginUsername，源域 owner 命中即放行，否则查 adminUsers 白名单，均不中抛 BusinessException。复用 8.4 的 checkPermission 模式，建议抽 KnowledgePermissionHelper（含 isDomainOwner/isAdmin/checkPermission）供域 CRUD 和转移共用。同 8.4，本期白名单兜底，后续接入统一权限平台替换；前端按 源域 owner == 当前用户 或管理员标志控制"转移域"按钮显隐。
+
+### 9.5 连带与边界
+
+- 幂等键漂移：upsert 实际按 (domainAtomId, atomId) 匹配（KnowledgeEntityServiceImpl:34-37，非设计三元组）。转移后 (A,X) upsert miss → 若该实体有 ongoing 来源（Keeper 同步/LLM 抽取）仍按旧域 A 写，会在 A 重建副本。转移仅用于无 ongoing 来源的存量，或需同步调整来源目标域。
+- atomId 键 FK 全部稳定：property/relation/conflict 的 atomId 引用转移后仍解析，这是转移能安全做的根基。
+
+---
+
+## 十、知识修改历史（审计日志，本期支持）
+
+### 10.1 背景与现状
+
+需要"能看到知识的修改历史"。现状：审计基础设施从零——
+
+- 核心表（entity/property/relation）经 BaseEntity 只有 id/isValid/ctime/mtime，无 operator/last-modifier；MyBatisPlusMetaObjectHandler 只自动填 ctime/mtime，不填 operator → 只有"最后改时间"，无"谁改"、无历史。
+
+### 10.2 设计：新建专用知识变更日志表
+
+新建 tb_atlas_knowledge_change_log，修两个局限：① operationId 用 String（atomId，非 Long）；② beforeValue/afterValue 存真实实体状态快照（非请求/响应 blob）。
+
+```sql
+CREATE TABLE tb_atlas_knowledge_change_log (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY,
+    operation_type  VARCHAR(32)  NOT NULL COMMENT 'CREATE/UPDATE/DELETE/COPY/CONFLICT_DETECT/REVIEW/PUBLISH/TRANSFER',
+    operation_module VARCHAR(32) NOT NULL COMMENT 'ENTITY/PROPERTY/RELATION（操作对象层级）',
+    target_atom_id  VARCHAR(64)  NOT NULL COMMENT '被操作知识点 atomId（relation 用 sourceAtomId）',
+    domain_atom_id  VARCHAR(64)  COMMENT '归属域',
+    before_value    TEXT         COMMENT '操作前状态 JSON 快照',
+    after_value     TEXT         COMMENT '操作后状态 JSON 快照',
+    operator        VARCHAR(64)  NOT NULL COMMENT '操作人（SessionHelper，无 session 回退 system）',
+    remark          VARCHAR(512) COMMENT '备注',
+    is_valid        TINYINT DEFAULT 1,
+    ctime           DATETIME,
+    mtime           DATETIME,
+    KEY idx_target (target_atom_id, ctime),
+    KEY idx_domain (domain_atom_id, ctime)
+);
+```
+
+### 10.3 写入机制
+
+- 机制：复用 @OperationLog annotation + OperationLogAspect（@Around 全 HTTP controller）思路，为知识 controller 加注解；或新建 @KnowledgeChangeLog + 专属 aspect。审计写入走 @Async 的 facade（镜像 OperationLogFacadeService.saveAsync），失败吞（审计异常不阻断主业务）。
+- 事务：@Async 松一致（审计写入不影响主业务事务）。非事务方法（createEntity/addRelation/publishEntity/batchReview）无需改事务边界。
+- operator：SessionHelper.getLoginUsername(request) + 回退 "system"（与 OperationLogAspect:322 同款）。
+
+### 10.4 记录范围与边界
+
+<table>
+  <colgroup><col width="497"/><col width="400"/></colgroup>
+  <thead><tr><th>记录</th><th>不记录</th></tr></thead>
+  <tbody><tr><td>人工编辑：CREATE/UPDATE/DELETE/COPY（实体/属性/关系 CRUD）</td><td>程序化导入：Git/DwKb 导入、TableFieldSync 拉取、KnowledgeConstruct 定时抽取</td></tr><tr><td>运维操作：TRANSFER（域间转移，见十四）、CONFLICT_DETECT（手动触发）、REVIEW（复核）、PUBLISH（上线发布）</td><td>未来程序化写入：MCP/Agent 写、tool_push（见十三）</td></tr></tbody>
+</table>
+
+
+> 边界推定：人工编辑 + 运维操作全记；程序化路径不记（量大、噪音高，且非"修改历史"语义）。手动触发的冲突检测/复核/发布属运维操作，记；定时/cron 触发的不记。
+
+
+### 10.5 读取 API
+
+新增 GET /atlas/knowledge/{domainId}/entities/{atomId}/change-log（或通用 /atlas/knowledge/change-log?atomId=&domainId=&operationType=），按 target_atom_id + ctime 倒序返回变更列表，含操作类型/operator/前后快照/时间。
+
+## 十一、消费/生产 Agent 详细度区分：三级别 scene 标识（本期支持）
+
+### 11.1 需求与决策
+
+需求两点：
+
+- P1（FIELD 可用性）：字段类型知识点增加可用性标识——消费侧可用 / 生产侧可用 / 都不可用。
+- P2（详细度区分）：消费 Agent 和生产 Agent 看到的知识详细程度不同，需要知识点级别、属性级别、关系级别的场景标识。
+
+决策（W）：P1 与 P2 合并为一套实现——三级别统一 scene 场景标识体系，知识点级用 propKey availability 承载（对齐需求 P1"可用性标识"原称），一个概念、一套读过滤逻辑。P1 即 FIELD 的 availability 特例。原决策 U 的 availability propKey 直接沿用，不再单列。
+
+### 11.2 取值与语义
+
+知识点级 propKey availability 取 4 值：
+
+<table>
+  <colgroup><col width="203"/><col width="109"/><col width="97"/></colgroup>
+  <thead><tr><th>值</th><th>语义</th><th>可见角色</th></tr></thead>
+  <tbody><tr><td>CONSUME</td><td>消费侧关注</td><td>消费 </td></tr><tr><td>PRODUCE</td><td>生产侧关注</td><td>仅生产</td></tr><tr><td>COMMON</td><td>双侧都关注</td><td>消费 + 生产</td></tr><tr><td>UNAVAILABLE</td><td>双侧都不可用</td><td>仅运维</td></tr></tbody>
+</table>
+
+
+各载体取值范围与默认：
+
+<table>
+  <colgroup><col width="80"/><col width="145"/><col width="264"/><col width="118"/><col width="280"/></colgroup>
+  <thead><tr><th>级别</th><th>载体</th><th>取值范围</th><th>默认</th><th>说明</th></tr></thead>
+  <tbody><tr><td>知识点</td><td>entity（FIELD）</td><td>CONSUME/PRODUCE/UNAVAILABLE</td><td>CONSUME</td><td>字段天生专一侧，不取 COMMON；= P1</td></tr><tr><td>知识点</td><td>entity（非 FIELD）</td><td>CONSUME/PRODUCE/COMMON</td><td>COMMON</td><td>知识点默认双侧可见</td></tr></tbody>
+</table>
+
+
+> UNAVAILABLE 用于"双侧都隐藏"：FIELD 废弃字段（P1 原意），非 FIELD 亦可用于一键隐藏陈旧知识点/关系（比 P1 原方案更灵活）。
+
+
+### 11.3 存储形态
+
+三级别区分机制按载体特性分别定策略，不搞全局一套：
+
+<table>
+  <colgroup><col width="137"/><col width="212"/><col width="393"/><col width="400"/></colgroup>
+  <thead><tr><th>级别</th><th>区分机制</th><th>存储</th><th>说明</th></tr></thead>
+  <tbody><tr><td>知识点（entity）</td><td>propKey availability</td><td>EAV 实存（KnowledgeProperty(propKey="availability")）</td><td>走 buildProp + upsert，与既有 EAV 同路；FIELD 与非 FIELD 通用</td></tr><tr><td>关系（relation）</td><td>relationType→scene 映射</td><td>不入库，读侧派生</td><td>RelationTypeSceneMapping 常量类，relationType 决定 scene</td></tr><tr><td>属性（property）</td><td>propKey→scene 映射 或 加列</td><td>二选一（见下）</td><td></td></tr></tbody>
+</table>
+
+
+属性级两种实现选择：
+
+<table>
+  <colgroup><col width="154"/><col width="369"/><col width="384"/><col width="331"/></colgroup>
+  <thead><tr><th>选择</th><th>机制</th><th>收益</th><th>代价</th></tr></thead>
+  <tbody><tr><td>① 映射派生（推荐）</td><td>PropKeySceneMapping 常量类，读侧按 propKey 派生</td><td>不改表 schema；维护集中一份映射</td><td>无法逐行覆盖（同 propKey 所有行 scene 相同）</td></tr><tr><td>② 数据库加列</td><td>tb_atlas_property 加 availability 列，逐行赋值</td><td>单属性粒度可差异化（同 propKey 不同行可不同 scene）</td><td>改表 schema + 导入/写入都填值</td></tr></tbody>
+</table>
+
+
+> 多数场景同 propKey 的 scene 一致（如所有 data_type 行都是 PRODUCE）。若无逐行差异化需求，选①映射派生即可。
+
+
+实例（属性级走映射派生）：DT dt_001（源 scope=生产→PRODUCE）+ FIELD fld_002（无 scope→默认 UNAVAILABLE）+ 关系 rel_003（BELONG_TAB）
+
+- tb_atlas_entity：无 scene 列，dt_001/fld_002 均为普通实体行。
+- tb_atlas_property（EAV）：dt_001、fld_002 各有一行 propKey=availability 实存（值 PRODUCE / UNAVAILABLE）；其余属性行（table_type/cname/data_type 等）不带 availability，读时按 propKey 派生。
+- tb_atlas_relation：无 scene 列，rel_003 BELONG_TAB 读时按 relationType→COMMON 派生。
+
+读侧（getEntity(dt_001, agentRole=PRODUCE)，可见 ∈ {CONSUME,PRODUCE,COMMON}）：dt_001.availability=PRODUCE ✓ 返回；fld_002.availability=UNAVAILABLE ✗ 隐藏。若 agentRole=CONSUME：dt_001.availability=PRODUCE ∉ {CONSUME,COMMON} → 整个知识点不可见。
+
+### 11.4 读侧过滤（agentRole 投影）
+
+读 API（getEntity / listEntities / getPanorama / getCandidates）新增可选参数 agentRole（CONSUME/PRODUCE/COMMON；缺省=不过滤，向后兼容）：
+
+<table>
+  <colgroup><col width="161"/><col width="244"/><col width="244"/><col width="244"/></colgroup>
+  <thead><tr><th>agentRole</th><th>知识点可见 scene</th><th>属性可见 scene</th><th>关系可见 scene</th></tr></thead>
+  <tbody><tr><td>CONSUME</td><td>CONSUME, COMMON</td><td>CONSUME, COMMON</td><td>CONSUME, COMMON</td></tr><tr><td>PRODUCE</td><td>CONSUME, PRODUCE, COMMON</td><td>CONSUME, PRODUCE, COMMON</td><td>CONSUME, PRODUCE, COMMON</td></tr><tr><td>COMMON（通用类）</td><td>CONSUME, COMMON</td><td>CONSUME, COMMON</td><td>CONSUME, COMMON</td></tr><tr><td>（缺省=运维）</td><td>全部（含 UNAVAILABLE）</td><td>全部</td><td>全部</td></tr></tbody>
+</table>
+
+
+> 通用类 Agent：COMMON 角色过滤规则等同 CONSUME（只见 CONSUME+COMMON）；语义区分（CONSUME=明确消费侧，COMMON=未声明侧别默认按消费）便于审计。
+
+
+- UNAVAILABLE 在 agentRole 过滤下对消费/生产/通用均不可见，仅运维（无 agentRole 或运维角色）可见。
+- FIELD 的可用性闸门即 scene 过滤：消费/通用角色只见 availability=CONSUME 的 FIELD；生产角色见 CONSUME+PRODUCE；UNAVAILABLE 的废弃字段对所有 Agent 侧都隐藏。
+- 实现位置：KnowledgeEntityFacadeService 读路径在组装 VO 前按 agentRole 裁剪 property/relation 集合；entity 级 availability 存 EAV（join/subquery availability 属性，或先取实体再 in-memory 过滤）；属性级按选择①映射派生或选择②列读取；关系级按 relationType 映射派生。
+
+#### 11.4.1 废弃字段 UI 展示（人工编辑界面）
+
+需求 P1-3 明确要求"标记为'不可用'的字段在列表中灰显并加废弃标签"。上文的 agentRole 过滤是 Agent 消费侧（API 按 role 裁剪返回）；本节是人工编辑侧（前端展示层），两者不同：
+
+<table>
+  <colgroup><col width="400"/><col width="321"/><col width="308"/></colgroup>
+  <thead><tr><th>场景</th><th>不可用字段（availability=UNAVAILABLE）处理</th><th>实现层</th></tr></thead>
+  <tbody><tr><td>Agent 消费（CONSUME/PRODUCE/COMMON 角色调用 API）</td><td>不返回（11.4 过滤裁掉）</td><td>后端 KnowledgeEntityFacadeService 读路径</td></tr><tr><td>人工编辑（前端列表/详情页）</td><td>灰显 + 废弃标签，仍可查看但不可编辑</td><td>前端按 scene 渲染</td></tr></tbody>
+</table>
+
+
+前端展示规则（FIELD 列表，对齐需求 P1-3 线框）：
+
+- 人工编辑界面不走 agentRole 过滤（缺省=运维，返回全部含 UNAVAILABLE），前端根据返回的 availability 属性值渲染：
+    - availability=UNAVAILABLE：灰色文字 + 废弃 标签，编辑表单该字段只读或禁用
+    - availability=PRODUCE：正常显示 + 生产侧 标签（提示消费 Agent 看不到）
+    - availability=CONSUME/COMMON：正常显示
+- 前端需从 edgeProps/property 中取 availability propKey 值判断（知识点级 availability 存 EAV propKey）；若属性级走映射派生（11.3 选择①），前端需查 PropKeySceneMapping 常量类获知每个 propKey 的 scene。
+
+### 11.5 默认映射草案
+
+propKey → scene（属性级，示例，待确认）：
+
+- COMMON：cname / description / en_name / name
+- PRODUCE：data_type / col_index / is_primary_key / is_partition / is_foreign_key / rollupable / keys
+- CONSUME：aggregation（消费侧算指标需知汇总方式）等
+
+relationType → scene（关系级，示例，待确认）：
+
+- COMMON：BELONG_TO / BELONG_TAB / BIND_MEANING / PARENT_ENUM
+- PRODUCE：BP_TAB / CHECK_OBJECT / CONTAIN_SP / CONTAIN_DT / PRIMARY_DT / BE_REL
+- CONSUME：消费侧独有关系（待梳理）
+
+> 上述映射为草案，需知识 owner 按"消费 Agent / 生产 Agent 各自关心什么"逐项核定，登记到 13.8 待确认。
+
+
+### 11.6 写入侧赋值
+
+- git_kb（源 scope 优先）：dw-kb YAML 部分 atom 顶层带 scope 字段（取值 生产/消费/通用）。导入时按以下优先级定知识点级 availability：
+    1. atom 有显式 scope → 映射 生产→PRODUCE / 消费→CONSUME / 通用→COMMON，写入 availability，覆盖类型默认（用户确认：源 scope 为准）。
+    2. atom 无 scope → 走类型默认：FIELD→CONSUME，非 FIELD→COMMON。
+    - 覆盖率现状（实测 1,418 atom）：仅 109（7.7%）带显式 scope（生产 58 / 通用 43 / 消费 8）。DT 45/45 全覆盖、SP 36/42、ATTR 23/766、MET 4/243、BP 1/73；ENUM/BR/BE/BT/FAQ 为 0。其余 92.3% 走类型默认。
+    - inct/cnsm 等子目录名是域分组，不是 scope 信号，不参与 scope 派生。
+    - 属性/关系级 scene 由映射派生，导入时不单独写（属性级若选 11.3 选择②加列则需写 availability 列）。
+- agent_write / tool_push（HTTP 写底座）/ MCP 写工具 / 人工编辑：均可显式指定 availability，缺省按类型默认（FIELD→CONSUME，非 FIELD→COMMON）。
+
+### 11.7 与既有决策的关系
+
+- 决策 U（FIELD availability）：并入本决策 W。availability propKey 沿用不变（FIELD 取 CONSUME/PRODUCE/UNAVAILABLE），由"FIELD 专用可用性标识"扩展为"三级别场景标识的知识点级载体"；4.11 已同步改写。
+- 原 scope 提案（生产/消费/通用，知识点级）：早已废弃，由本 availability 正式取代并扩展到三级别。
+- 原"除 FIELD 外不区分生产侧/消费侧"原则（第二节字段设计原则）：撤销，改为三级别统一区分。
+
+## 十二、知识写入通道与 MCP 设计
+
+### 12.1 背景与定位
+
+dw-kb 迁移是一次性静态导入。迁移完成后，生产 Agent 和数仓工具（Keeper/ETL 等）需要持续写入通道把新知识写进 Atlas。
+
+### 12.2 现状摸底
+
+<table>
+  <colgroup><col width="155"/><col width="707"/></colgroup>
+  <thead><tr><th>维度</th><th>现状</th></tr></thead>
+  <tbody><tr><td>HTTP 写接口</td><td>有，但面向前端 UI，未对外部服务暴露（网关无外部服务路由）；<br>且粒度卡在整原子：实体 CRUD ✅（POST/PUT/DELETE /atlas/knowledge/{domainId}/entities）、<br>建关系 ✅（POST .../entities/{atomId}/relations）；<br>关系改/删 ❌（折进 updateEntity.deletedRelIds）、<br>单属性增改删 ❌（折进 updateEntity.attrs）、<br>边属性写 ❌</td></tr><tr><td>MCP</td><td>完全空白（0 依赖、0 @Tool、0 server）</td></tr><tr><td>鉴权</td><td>端点进程内无鉴权（靠网关 mesh upstream）</td></tr></tbody>
+</table>
+
+
+### 12.3 设计方向
+
+- HTTP 写底座建在 Atlas：细粒度 property/relation/边属性端点 + 幂等 + 鉴权 + origin_type。建一次——数仓工具直连 。
+- MCP 复用 cognee-mcp（就地扩展）。
+
+#### MCP 服务形态：两方案并列，待技术评审定
+
+<table>
+  <colgroup><col width="125"/><col width="400"/><col width="231"/><col width="400"/></colgroup>
+  <thead><tr><th>方案</th><th>说明</th><th>优点</th><th>代价</th></tr></thead>
+  <tbody><tr><td>A 并存一 server</td><td>cognee-mcp 一个 server，Ulduar search + Atlas 写 tools 共存</td><td>少部署；agent 挂一个 MCP 读写</td><td>两套后端/鉴权耦在一个 server，token 参数承载两种语义排查糊；owner 跨系统耦合</td></tr><tr><td>B 分开两 server</td><td>cognee-mcp 留 Ulduar search；新建 atlas_mcp/ 写 server，共享 common/ 管道</td><td>后端/鉴权/owner 隔离，各演进</td><td>多一个部署；common/ 抽取一次性重构成本</td></tr></tbody>
+</table>
+
+
+> 评审倾向：Ulduar search 仍活跃 → 方案 A 少部署；Atlas 要逐步接管读、Ulduar 趋弃用 → 方案 B 隔离更干净。最终以技术评审结论为准。
+
+
+### 12.4 cognee-mcp 复用地图
+
+<table>
+  <colgroup><col width="132"/><col width="567"/><col width="301"/></colgroup>
+  <thead><tr><th>复用程度</th><th>内容</th><th>来源</th></tr></thead>
+  <tbody><tr><td>原样复用</td><td>FastMCP server + main() transport 分发（stdio/SSE/streamable-http）、CORS + transport security 中间件、@log_usage 装饰器、token 显式参数鉴权（tool 必填参数，per-request 传递，见 search tool）、Dockerfile + entrypoint.sh（Paladin env 加载）、/health</td><td>server.py / entrypoint.sh</td></tr><tr><td>改造（留壳换芯）</td><td>CogneeClient（双模）→ AtlasClient（仅 API 模式，httpx 调 Atlas HTTP；砍掉 in-process cognee import，Atlas 是 Java）</td><td>cognee_client.py</td></tr><tr><td>新增（Atlas 专属）</td><td>Atlas 写 tool 定义 + Atlas HTTP 端点映射 + backend 非 0 code → isError CallToolResult</td><td>新写</td></tr><tr><td>前置</td><td>Atlas HTTP 写</td><td>HTTP 部分</td></tr></tbody>
+</table>
+
+
+约 70% 管道直接复用；要换的只有 tool 定义和 client 抽象。
+
+### 12.5 HTTP 写（待建）
+
+> 定位：现有 controller 面向前端 UI，网关无外部服务路由（见 12.2）。本期新建面向外部服务的写入入口（路由 /api/v1/writing/**），薄转发 facade/service 层逻辑（不重写业务），挂 service token 拦截器。复用的是 facade 逻辑，不是前端 controller 端点。数仓工具直连此入口，MCP sidecar 也调此入口。下文端点路径均归属此入口（/api/v1/writing/**）。
+
+
+<table>
+  <colgroup><col width="212"/><col width="168"/><col width="400"/></colgroup>
+  <thead><tr><th>端点</th><th>现状</th><th>待补</th></tr></thead>
+  <tbody><tr><td>实体 CRUD</td><td>✅</td><td>facade 逻辑复用，新建外部服务入口</td></tr><tr><td>建关系</td><td>✅</td><td>facade 逻辑复用，新建外部服务入口</td></tr><tr><td>关系改/删</td><td>❌</td><td>PUT/DELETE /api/v1/writing/{domainId}/entities/{atomId}/relations/{relId}</td></tr><tr><td>单属性增改删</td><td>❌</td><td>POST .../entities/{atomId}/properties（按 propKey upsert）+ DELETE .../properties/{propId}</td></tr><tr><td>边属性写（含通用备注）</td><td>❌（6.6 写链路在建）</td><td>POST .../relations/{relId}/properties（6.6 的 HTTP 出口，按 propKey upsert，含 note）</td></tr><tr><td>批量写入（实体+属性+关系）</td><td>❌</td><td>见 12.5.1</td></tr><tr><td>幂等</td><td>⚠️ createEntity 每次新雪花</td><td>接 10.3：create 命中三元组复用 atomId（findExistingAtomId）</td></tr><tr><td>origin_type</td><td>未定</td><td>agent_write/tool_push，P1/50（见 13.6）</td></tr><tr><td>鉴权</td><td>进程内无（靠网关）</td><td>程序化 caller service token</td></tr></tbody>
+</table>
+
+
+#### 12.5.1 批量写入端点（需求 P0-5）
+
+需求 P0-5 要求"生成器一次产出多个知识点"。当前零批量写入端点，且 createEntity:627 无 @Transactional，partial-failure 风险高。
+
+端点：POST /api/v1/writing/{domainId}/entities/batch，
+
+body BatchEntityCreateRequest
+
+请求：
+
+```json
+{originType: "tool_push", entities: [{type, attrs, relations: [{r, t, note?}]}]}
+```
+
+（复用 EntityCreateRequest 结构，批量级 originType + 每条带属性+关系+边属性备注）
+
+实现：新建 batchCreateEntities facade，方法级 @Transactional，遍历 entities[] 逐条复用 createEntity(domainId,...) 逻辑（originType 用入参非硬编码，命中三元组复用 atomId）。
+
+<table>
+  <colgroup><col width="92"/><col width="548"/></colgroup>
+  <thead><tr><th>关键设计</th><th>说明</th></tr></thead>
+  <tbody><tr><td>事务</td><td>整批一个事务，成功或回滚；可选 allowPartialSuccess（缺省 false）容错</td></tr><tr><td>幂等</td><td>三元组 (atomType, domainAtomId, enName) 命中复用 atomId（见 10.3）</td></tr><tr><td>originType</td><td>批量级入参，复用 resolveOriginType:146（现死代码）</td></tr></tbody>
+</table>
+
+
+响应：
+
+```css
+{total, succeeded, failed, results: [{enName, atomId, status: created/merged}], errors: []}
+```
+
+量级：1 端点 + 1 facade + 2 DTO，~80-120 行。MCP 不直接暴露批量端点（Agent 用单对象 tool，数仓生成器用 HTTP 批量）。
+
+### 12.6 程序化写入来源与优先级
+
+<table>
+  <colgroup><col width="209"/><col width="80"/><col width="97"/><col width="206"/></colgroup>
+  <thead><tr><th>来源（origin_type）</th><th>优先级</th><th>confidence</th><th>说明</th></tr></thead>
+  <tbody><tr><td>git_kb</td><td>P0</td><td>80</td><td>dw-kb curated（本迁移）</td></tr><tr><td>agent_write</td><td>P1</td><td>50</td><td>生产 Agent 经 MCP/HTTP 写</td></tr><tr><td>tool_push</td><td>P1</td><td>50</td><td>数仓工具经 HTTP push 写</td></tr></tbody>
+</table>
+
+
+### 12.7 MCP 工具设计
+
+#### 12.7.1 tool 定义规范
+
+对齐 cognee-mcp server.py search tool 模式：@mcp.tool() + @log_usage() + async def + 中文 docstring（作 tool description）+ 类型注解参数 + token: str 显式必填 + return list[types.TextContent]（JSON）。函数体包 with redirect_stdout(sys.stderr):，httpx 调 Atlas（Authorization: Bearer {token} header，ATLAS_BASE_URL 环境变量），HTTP>=400 raise RuntimeError → FastMCP 自动转 isError。
+
+> 鉴权说明：cognee-mcp 源码无 _resolve_credentials 函数，实际是 token 作 tool 显式参数（search tool L678），放请求体 user_identity.token（Ulduar）或 Bearer header（CogneeClient._get_headers）。Atlas MCP 调写底座走 Bearer header。
+
+
+#### 12.7.2 tool 清单
+
+高级 tool 一对象一 tool，内部多步（建实体→属性→关系→边属性）调 Atlas HTTP，返回 atomId——Agent 一次 call 写完一个业务对象，少漏步。低级 tool 兜特殊场景。返回均 list[TextContent]，JSON 含 atomId/relId/propId + status。
+
+<table>
+  <colgroup><col width="80"/><col width="140"/><col width="80"/><col width="400"/><col width="400"/><col width="80"/></colgroup>
+  <thead><tr><th>#</th><th>tool</th><th>类型</th><th>参数（除 domain/token 必填外）</th><th>内部流程</th><th>后端</th></tr></thead>
+  <tbody><tr><td>1</td><td>create_metric</td><td>高级</td><td>name, en_name, metric_type, sql_pattern_id?, filter_dims?[{dim_id, note?}], attrs?</td><td>建MET→属性→CONTAIN_SP→FILTER_BY_DIM_ATTR+边属性note</td><td>Atlas</td></tr><tr><td>2</td><td>create_dimension</td><td>高级</td><td>name, en_name, enum_ids?[{enum_id, note?}], attrs?</td><td>建DIM→属性→CONTAIN_ENUM+边属性note</td><td>Atlas</td></tr><tr><td>3</td><td>create_table</td><td>高级</td><td>name, en_name, fields?[{en_name, name, enum_atom?, attrs?}], attrs?</td><td>建DT→属性→逐条建FIELD+BELONG_TAB→FIELD_ENUM（决策I）</td><td>Atlas</td></tr><tr><td>4</td><td>create_field</td><td>高级</td><td>name, en_name, table_id?, enum_atom?, attrs?</td><td>建FIELD→属性→BELONG_TAB→FIELD_ENUM</td><td>Atlas</td></tr><tr><td>5</td><td>create_relation</td><td>高级</td><td>source_id, r, target_id, note?</td><td>建关系→若note设边属性（跨域取source域，决策D）</td><td>Atlas</td></tr><tr><td>6</td><td>create_entity</td><td>低级</td><td>type(12种之一), name, en_name, attrs?</td><td>建实体→属性（不建关系，兜底BP/BE/ATTR/ENUM/BT/BR/SP/FAQ）</td><td>Atlas</td></tr><tr><td>7</td><td>upsert_property</td><td>低级</td><td>atom_id, prop_key, value</td><td>单属性 upsert</td><td>Atlas</td></tr><tr><td>8</td><td>set_edge_props</td><td>低级</td><td>rel_id, prop_key, value</td><td>边属性 upsert（激活 belongType=RELATION，决策H/P）</td><td>Atlas</td></tr><tr><td>9</td><td>search_atoms</td><td>查询</td><td>query, domain?, atom_type?, top_k?</td><td>复用 search tool 调 Ulduar，供建跨域关系选 target</td><td>Ulduar</td></tr></tbody>
+</table>
+
+
+- 端点：高级 tool 1-4 调实体CRUD+建关系+单属性+边属性（12.5）；tool 5/8 调建关系+边属性；tool 3/4 含 FIELD_ENUM（见 4.11）。
+- transport：streamable-http（推荐）/ SSE / stdio。错误：HTTP>=400 → isError。
+- 9 个 tool 覆盖 P0-5 主要场景。其余类型走 create_entity 兜底；如需按 12 种类型逐个建高级 tool 可扩展。
+
+---
+
+---
+
+## 十三、前端字段配置扩展（按类型动态渲染，本期支持）
+
+### 13.1 背景与现状
+
+需求 P0-1 要求"沿用 Atlas 现有的按类型配置表单的框架，每种知识点类型有独立的字段配置，前端根据配置动态渲染编辑表单。新增字段只需扩展配置"。
+
+现状摸底：
+
+<table>
+  <colgroup><col width="146"/><col width="724"/></colgroup>
+  <thead><tr><th>维度</th><th>现状</th></tr></thead>
+  <tbody><tr><td>前端字段配置</td><td>位于外部 ulduar/cognee-frontend 仓库的 schema.ts（TYPE_FIELDS/LOCKED_FIELDS 按类型组织的字段配置常量），前端已按配置动态渲染——这就是需求说的"现有框架"</td></tr><tr><td>widget 控件目录</td><td>fields/ 下 12 种 widget 组件（text/textarea/select/boolean/tags/code/enum-table/field-table/param-table/step-list/ref-list/object），已有无需重建</td></tr><tr><td>atom-schema.json</td><td>不存在。需求中引用的是 dw-kb 系统的 JSON Schema，非 atlas 资产</td></tr><tr><td>后端</td><td>EAV 模型（KnowledgeProperty 任意 propKey 可存），写入链路不校验字段定义，后端无需调整</td></tr><tr><td>后端 VO 三件套</td><td>OntologyVO/TypeDefVO/FieldDefVO 已定义但全仓零实例化，属历史遗留设计意图，本期不落地后端接口</td></tr></tbody>
+</table>
+
+
+> 结论：需求说"沿用现有框架"=前端 schema.ts 配置驱动渲染机制；"无需重建前端"=保持该架构不动；"新增字段只需扩展配置"=往 TYPE_FIELDS 加字段定义。后端是 EAV，任意 propKey 都能存，不需要字段配置表或接口。
+
+
+### 13.2 新增字段的控件类型配置（前端 schema.ts 扩展）
+
+需求第五章列了每种新增字段及控件类型。对照 schema.ts 的 widget 约定，扩展 TYPE_FIELDS 配置如下：
+
+<table>
+  <colgroup><col width="80"/><col width="230"/><col width="206"/><col width="400"/></colgroup>
+  <thead><tr><th>类型</th><th>新增字段</th><th>widget</th><th>options（select 类型）</th></tr></thead>
+  <tbody><tr><td>BP</td><td>nature 过程性质</td><td>select</td><td>用户行为 / 系统处理 / 数据展示</td></tr><tr><td>BE</td><td>entity_type 实体类型</td><td>select</td><td>核心 / 子实体 / 引用实体</td></tr><tr><td>MET</td><td>metric_type 指标类型</td><td>select</td><td>原子 / 衍生 / 复合</td></tr><tr><td>MET</td><td>aggregation 聚合方式</td><td>text</td><td>—</td></tr><tr><td>MET</td><td>data_type 数据类型</td><td>text</td><td>—</td></tr><tr><td>MET</td><td>expression 计算表达式</td><td>code</td><td>—</td></tr><tr><td>MET</td><td>derivation_description 衍生说明</td><td>textarea</td><td>—</td></tr><tr><td>MET</td><td>is_template 是否模板</td><td>boolean</td><td>—</td></tr><tr><td>MET</td><td>instances 模板实例列表</td><td>tags</td><td>—</td></tr><tr><td>DIM</td><td>attribute_type 属性类型</td><td>select</td><td>标识 / 简单 / 衍生</td></tr><tr><td>DIM</td><td>data_type 数据类型</td><td>text</td><td>—</td></tr><tr><td>DT</td><td>table_layer 数仓分层</td><td>select</td><td>ODS / DWD / DWS / DM</td></tr><tr><td>DT</td><td>table_model_type 建模类型</td><td>select</td><td>事实表 / 维度表 / 宽表</td></tr><tr><td>FIELD</td><td>availability 场景标识</td><td>select</td><td>可用(CONSUME) / 仅生产侧(PRODUCE) / 不可用(UNAVAILABLE)</td></tr><tr><td>FIELD</td><td>keys Map字段key列表</td><td>tags</td><td>—</td></tr><tr><td>BR</td><td>rule_type 规则类型</td><td>select</td><td>计算规则 / 分类规则 / 检查规则</td></tr><tr><td>BR</td><td>expression 规则表达式</td><td>code</td><td>—</td></tr></tbody>
+</table>
+
+
+> availability 字段沿用（决策 U 原名，决策 W 合并扩展为三级别场景标识），widget 用 select，options 对齐 availability 取值。前端渲染时 CONSUME/PRODUCE 正常显示，UNAVAILABLE 灰显+废弃标签（见 11.4.1）。
+> LOCKED_FIELDS 补充不可删除的锁定字段（如 name/en_name/description），前端据此禁用删除按钮。required/recommended 标记消费侧必填/推荐（对齐需求第五章"适用场景"列）。
+
+
+### 13.3 废弃字段 UI（前端渲染逻辑）
+
+UNAVAILABLE 场景的字段前端灰显 + 废弃标签（见 11.4.1），纯前端渲染逻辑，无后端改动。
+
+### 13.4 量级评估
+
+纯前端改动（schema.ts 扩展 TYPE_FIELDS/LOCKED_FIELDS + 废弃字段渲染逻辑），无后端文件、无 DDL、无新表、无破坏性改动。后续新增字段仍只需扩展 schema.ts，无需改后端——这正是需求 P0-1 说的"新增字段只需扩展配置"。
+
+## 待确认点
+
+以下关系尚未最终确认，不阻塞主体实现，待椰子等确认后补全：
+
+<table>
+  <colgroup><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>关系/议题</th><th>状态</th></tr></thead>
+  <tbody><tr><td>剩余维度/属性 与 字段/表/规则 的关系（DIM→DT / DIM→FIELD / DIM→BR 等）</td><td>待椰子确认</td></tr><tr><td>CONTAIN_DT 边属性（layer/role/join_key/scope/filter）git 是否有对应数据</td><td>待确认（当前 git 中无相关属性）</td></tr><tr><td>新增 RelationType 总数（目标 9 个，已定 5 个）</td><td>余 4 个待补全/确认</td></tr><tr><td>业务实体的关系 【区分source 和 target】 创建知识的人给出规则 source 和 target</td><td>待椰子确认</td></tr><tr><td>表和字段是否允许生产侧写入？（atlas侧维护）</td><td>需椰子确认（写入权限边界</td></tr><tr><td>业务域权限：平台管理员角色如何判定（仓库无角色体系，本期临时白名单）</td><td>待确认：是否接入统一权限平台 / 维持白名单 / 其他（见 8.4）</td></tr><tr><td>跨域关系标注来源域（P0-6）：getEntity 单实体详情场景跨域 target 渲染成裸 id，本期不修</td><td>待产品确认是否可延期至下一迭代；若不可延期需补 buildCrossDomainRefs 机制（见 7.已知渲染缺口）</td></tr><tr><td>MCP 服务形态（A 并存 / B 分开）</td><td></td></tr><tr><td>dw-kb scope 覆盖缺口：仅 7.7%（109/1418）atom 带显式 scope（DT 100%、SP 86%、ATTR 3%、其余 0%），92.3% 走类型默认</td><td>需知识 owner 确认：无 scope 的 ATTR/MET/BP/ENUM/BR/BE/BT/FAQ 是否接受"非 FIELD→COMMON 默认"（见 16.6），或需按类型补 scope</td></tr></tbody>
+</table>
+
+
+### 已确认
+
+<table>
+  <colgroup><col width="80"/><col width="237"/><col width="400"/><col width="400"/></colgroup>
+  <thead><tr><th>#</th><th>议题</th><th>决策</th><th>理由</th></tr></thead>
+  <tbody><tr><td>A</td><td>表达式{met_xxx}</td><td>原样保留</td><td>文本给 Agent 读，不走关系推理</td></tr><tr><td>B</td><td>模板 MET instances</td><td>JSON 属性</td><td>模板存 entity，instances 存 property</td></tr><tr><td>C</td><td>Atlas 不支持的关系</td><td>新增 RelationType（已定 5 个，余待确认）</td><td>已定：CONTAIN_SP/CONTAIN_DT/BE_REL/PRIMARY_DT/PARENT_ENUM</td></tr><tr><td>D</td><td>跨域关系归属</td><td>domainAtomId = source 域</td><td>与现有代码一致</td></tr><tr><td>E</td><td>量纲是否独立</td><td>合入 BT，不拆</td><td>量纲是 BT 子类型，term_type 区分</td></tr><tr><td>F</td><td>枚举父子层级</td><td>PARENT_ENUM 关系</td><td>比属性存储更利于检索和推理</td></tr><tr><td>G</td><td>指标→SQL 模式</td><td>CONTAIN_SP 直接关系</td><td>最核心消费路径，Agent 从指标直接找到 SQL</td></tr><tr><td>H</td><td>边属性存储</td><td>KnowledgeProperty (belongType=RELATION)</td><td>无需改表，产品透明</td></tr><tr><td>I</td><td>字段→枚举</td><td>新增 FIELD_ENUM 关系（FIELD → ENUM）</td><td>需求 6.1 [#11：dw-kb](#11：dw-kb) field_list.enum_atom 直接引用枚举，不经过维度；间接方案（FIELD→DIM→ENUM）在无 DIM 中间节点时关系断裂，故改为直接关系（见 4.11 / 五）</td></tr><tr><td>J</td><td>origin_type</td><td>git_kb（SourceEnum 新增）</td><td>对齐全枚举小写约定，可按来源删除/区分</td></tr><tr><td>K</td><td>域校验权威 + 域 CRUD 产品化</td><td>域表作权威，DomainEnum 保留不删；本期支持域 CRUD 产品化（创建/编辑/删除/列表/详情/概览）</td><td>新建 tb_atlas_knowledge_domain（含 sort 排序字段）；替换 5 处枚举校验 + listDomains；CRUD 全套参照 BusinessDomain，路由 /atlas/knowledge-domain；权限 owner/管理员（鉴权待补，临时白名单）；域下概览新增双维度 count mapper（见第八节）</td></tr><tr><td>L</td><td>冲突检测</td><td>全量不做 + 跨源命中确定性打标 + 个别域按需补跑</td><td>git 单源 curated，LLM 全量成本高 ROI 低（见 10.5）</td></tr><tr><td>M</td><td>断点恢复</td><td>本期不做</td><td>未来纯 Redis + 幂等重跑兜底（见 10.6）</td></tr><tr><td>N</td><td>跨域实体归属</td><td>实体取原生域，关系取 source 域</td><td>真·跨域，符合语义；暴露两个渲染缺口，本期不修（见 7.2/十二）</td></tr><tr><td>P</td><td>关系附带说明</td><td>两层设计：通用备注（所有关系）+ 结构化边属性（特定关系），端到端新建，本期建读取 API</td><td>方案 A（两层并行）；共用 KnowledgeProperty(belongType=RELATION) 存储，通用备注 propKey=note，结构化边属性各有专名；机制休眠（setBelongRelId 零调用/无读取 mapper），需端到端新建（见 6.6）</td></tr><tr><td>T</td><td>知识点域间转移</td><td>本期支持，仅 HTTP</td><td>前置：冲突清零 + 目标域去重；单事务改实体 domainAtomId + 重盖出边关系；原状态保留（见 14.2）</td></tr><tr><td>X</td><td>表单配置扩展（按类型动态渲染）</td><td>前端 schema.ts 扩展字段配置，后端不调整</td><td>需求"沿用现有框架"指前端 schema.ts 配置驱动渲染机制；后端 EAV 任意 propKey 可存不需字段配置表/接口；VO 三件套属历史遗留不落地（见第十三节）</td></tr></tbody>
+</table>
